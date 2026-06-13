@@ -1,7 +1,7 @@
 {
   "name": "youtube-clipper",
   "description": "Youtube Clipper",
-  "version": "1.0.0",
+  "version": "1.0.12",
   "type": "module",
   "repository": {
     "type": "git",
@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "vite",
+    "prebuild": "node scripts/bump-version.mjs",
     "build": "vite build",
     "check": "svelte-check --tsconfig ./tsconfig.json"
   },
@@ -27,5 +28,10 @@
     "tslib": "2.6.2",
     "typescript": "5.2.2",
     "vite": "4.2.3"
+  },
+  "dependencies": {
+    "@ffmpeg/core": "^0.12.6",
+    "@ffmpeg/ffmpeg": "^0.12.10",
+    "@ffmpeg/util": "^0.12.1"
   }
 }

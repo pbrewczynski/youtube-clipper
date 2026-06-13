@@ -24,8 +24,9 @@ export default defineManifest(async (env) => ({
 	},
 	content_scripts: [
 		{
-			matches: ['https://*/*'],
+			matches: ['*://www.youtube.com/watch*', '*://www.youtube.com/shorts*'],
 			js: ['src/content/index.ts'],
+			run_at: 'document_idle',
 		},
 	],
 	background: {
@@ -55,6 +56,25 @@ export default defineManifest(async (env) => ({
 			description: 'Play/Pause the first Youtube video tab',
 		},
 	},
-	permissions: ['activeTab', 'tabs', 'scripting', 'storage'],
-	host_permissions: ['http://*/', 'https://*/'],
+	permissions: ['activeTab', 'tabs', 'scripting', 'storage', 'downloads', 'offscreen', 'webRequest'],
+	host_permissions: [
+		'http://*/',
+		'https://*/',
+		'*://*.googlevideo.com/*',
+		'*://www.youtube.com/*',
+	],
+	web_accessible_resources: [
+		{
+			resources: ['assets/*.js', 'assets/*.css', 'ffmpeg/*', 'src/offscreen/index.html'],
+			matches: ['*://*.youtube.com/*'],
+			use_dynamic_url: true,
+		},
+		{
+			resources: ['ffmpeg/*', 'src/offscreen/index.html'],
+			matches: ['<all_urls>'],
+		},
+	],
+	content_security_policy: {
+		extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
+	},
 }));

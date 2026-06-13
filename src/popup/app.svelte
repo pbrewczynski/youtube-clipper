@@ -20,6 +20,7 @@
 	let isLight: boolean = false;
 	let isClipper = false;
 	let loadingUser = true;
+	const version = chrome.runtime.getManifest().version;
 
 	const updateTheme = () => {
 		if (!init) {
@@ -162,7 +163,8 @@
 			</button>
 		{/if}
 	</div>
-	<div class="h-[2px] bg-color0 w-full mt-2 mb-2" />
+	<div class="h-[2px] bg-color0 w-full mt-2 mb-1" />
+	<p class="w-full text-right text-[10px] opacity-50 font-mono pr-1 mb-1">v{version}</p>
 	{#if isClipper}
 		<ClipperPage />
 	{:else}
