@@ -36,9 +36,11 @@ export function initTrimmer() {
 }
 
 function injectClipButton() {
-	const observer = new MutationObserver(() => {
+	let playerObserver: MutationObserver | null = null;
+
+	const tryInject = () => {
 		const controls = document.querySelector('.ytp-right-controls');
-		if (!controls || controls.querySelector('.yt-clipper-btn')) return;
+		if (!controls || controls.querySelector('.yt-clipper-btn')) return false;
 
 		const btn = document.createElement('button');
 		btn.className = 'ytp-button yt-clipper-btn';
@@ -54,9 +56,25 @@ function injectClipButton() {
 			trimmerOverlay.show();
 		});
 
-		const first = controls.firstChild;
-		controls.insertBefore(btn, first);
-	});
+		controls.insertBefore(btn, controls.firstChild);
+		return true;
+	};
 
-	observer.observe(document.body, { childList: true, subtree: true });
+	const watchPlayer = () => {
+		const player = document.querySelector('#movie_player, .html5-video-player');
+		if (!player) return false;
+
+		tryInject();
+		playerObserver?.disconnect();
+		playerObserver = new MutationObserver(tryInject);
+		playerObserver.observe(player, { childList: true, subtree: true });
+		return true;
+	};
+
+	if (!watchPlayer()) {
+		const bootObserver = new MutationObserver(() => {
+			if (watchPlayer()) bootObserver.disconnect();
+		});
+		bootObserver.observe(document.body, { childList: true, subtree: false });
+	}
 }

@@ -17,10 +17,14 @@ function getVideoIdFromLocation(): string | null {
 
 async function main() {
 	if (!window.location.href.includes('youtube.com')) return;
-	storage = await getContentStorage();
-	const observer = new MutationObserver(onPageChange);
-	observer.observe(document.body, { childList: true, subtree: false });
-	onPageChange();
+	try {
+		storage = await getContentStorage();
+		const observer = new MutationObserver(onPageChange);
+		observer.observe(document.body, { childList: true, subtree: false });
+		onPageChange();
+	} catch {
+		// Extension context invalidated (reload/update) — ignore quietly.
+	}
 }
 
 function onPageChange() {
@@ -33,6 +37,6 @@ function onPageChange() {
 	startClipPlayback(storage, videoId);
 }
 
-main();
+void main();
 
 export { stopClipPlayback };
