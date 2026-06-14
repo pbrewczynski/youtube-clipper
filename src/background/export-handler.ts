@@ -3,6 +3,7 @@ import type {
 	ExportTrimRequest,
 	ExportTrimProgress,
 	ExportTrimResult,
+	FetchTrimStreamsResponse,
 	StreamUrls,
 } from '../messaging';
 
@@ -163,6 +164,31 @@ export async function handleExportTrim(request: ExportTrimRequest): Promise<Expo
 	}
 
 	try {
+		sendProgress(tabId, {
+			type: 'EXPORT_TRIM_PROGRESS',
+			phase: 'downloading',
+			percent: 0,
+			message: 'Downloading stream from YouTube…',
+		});
+
+		const fetched = (await chrome.tabs.sendMessage(tabId, {
+			type: 'FETCH_TRIM_STREAMS',
+			start,
+			end,
+			duration: request.duration,
+			streams,
+		})) as FetchTrimStreamsResponse | undefined;
+
+		if (!fetched?.ok || !fetched.videoData?.byteLength) {
+			return {
+				type: 'EXPORT_TRIM_RESULT',
+				success: false,
+				error:
+					fetched?.error ??
+					'Could not download stream — play the video for ~10 seconds, then retry Trim & Download.',
+			};
+		}
+
 		await ensureOffscreenDocument();
 
 		const jobId = crypto.randomUUID();
@@ -170,18 +196,18 @@ export async function handleExportTrim(request: ExportTrimRequest): Promise<Expo
 
 		sendProgress(tabId, {
 			type: 'EXPORT_TRIM_PROGRESS',
-			phase: 'downloading',
+			phase: 'trimming',
 			percent: 0,
-			message: 'Starting export…',
+			message: 'Encoding clip…',
 		});
 
 		await chrome.runtime.sendMessage({
 			type: 'TRIM_JOB',
 			jobId,
-			videoUrl: streamUrl,
-			audioUrl: streams.progressiveUrl ? undefined : streams.audioUrl,
-			start,
-			end,
+			videoData: fetched.videoData,
+			audioData: fetched.audioData,
+			trimStartOffset: fetched.trimStartOffset ?? start,
+			duration: end - start,
 			mode: resolveTrimMode(streams),
 		});
 

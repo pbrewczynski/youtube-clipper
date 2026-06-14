@@ -743,7 +743,7 @@ export class TrimmerOverlay {
 		if (this.streamsReady) {
 			this.setStatus('Ready — exports H.264 MP4 for web, iPhone, and Mac.');
 		} else {
-			this.setStatus('Ready — will record and encode to web-friendly MP4 if needed.');
+			this.setStatus('Play the video ~10s to capture the stream, then Trim & Download.');
 		}
 	}
 
@@ -828,6 +828,7 @@ export class TrimmerOverlay {
 			type: 'EXPORT_TRIM',
 			title: getVideoTitle(),
 			videoId: getVideoIdFromUrl(window.location.href) ?? '',
+			duration: this.duration,
 			range: { ...this.range },
 			streams,
 		})) as ExportTrimResult | undefined;

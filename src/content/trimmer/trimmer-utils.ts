@@ -9,20 +9,9 @@ export {
 } from '../../utils/youtube-player';
 
 import type { StreamUrls } from '../../messaging';
-import { getAdaptiveStreamUrls } from '../../utils/youtube-player';
 import { hasUsableStreams, sniffStreamsFromPerformance } from './performance-streams';
 
 export { hasUsableStreams };
-
-export async function getCapturedStreamsFromPage(): Promise<StreamUrls> {
-	const fromPerformance = sniffStreamsFromPerformance();
-	try {
-		const fromBackground = (await chrome.runtime.sendMessage({ type: 'GET_STREAMS' })) ?? {};
-		return { ...fromBackground, ...fromPerformance };
-	} catch {
-		return fromPerformance;
-	}
-}
 
 function isValidStreamUrl(url?: string): url is string {
 	if (!url) return false;
@@ -34,21 +23,31 @@ function isValidStreamUrl(url?: string): url is string {
 	}
 }
 
-function pickUrl(captured?: string, fallback?: string): string | undefined {
-	if (isValidStreamUrl(captured)) return captured;
-	if (isValidStreamUrl(fallback)) return fallback;
-	return undefined;
+function pickCapturedUrl(url?: string): string | undefined {
+	return isValidStreamUrl(url) ? url : undefined;
 }
 
-export async function resolveStreamUrls(): Promise<StreamUrls> {
-	const captured = await getCapturedStreamsFromPage();
-	const fromPlayer = getAdaptiveStreamUrls();
+export async function getCapturedStreamsFromPage(): Promise<StreamUrls> {
+	const fromPerformance = sniffStreamsFromPerformance();
+	try {
+		const fromBackground = (await chrome.runtime.sendMessage({ type: 'GET_STREAMS' })) ?? {};
+		return {
+			progressiveUrl: pickCapturedUrl(fromBackground.progressiveUrl ?? fromPerformance.progressiveUrl),
+			videoUrl: pickCapturedUrl(fromBackground.videoUrl ?? fromPerformance.videoUrl),
+			audioUrl: pickCapturedUrl(fromBackground.audioUrl ?? fromPerformance.audioUrl),
+		};
+	} catch {
+		return {
+			progressiveUrl: pickCapturedUrl(fromPerformance.progressiveUrl),
+			videoUrl: pickCapturedUrl(fromPerformance.videoUrl),
+			audioUrl: pickCapturedUrl(fromPerformance.audioUrl),
+		};
+	}
+}
 
-	const streams: StreamUrls = {
-		progressiveUrl: pickUrl(captured.progressiveUrl, fromPlayer.progressiveUrl),
-		videoUrl: pickUrl(captured.videoUrl, fromPlayer.videoUrl),
-		audioUrl: pickUrl(captured.audioUrl, fromPlayer.audioUrl),
-	};
+/** Only network-captured URLs — player-response URLs often 403 without a live session. */
+export async function resolveStreamUrls(): Promise<StreamUrls> {
+	const streams = await getCapturedStreamsFromPage();
 
 	if (hasUsableStreams(streams)) {
 		chrome.runtime.sendMessage({ type: 'REGISTER_STREAMS', streams }).catch(() => {});

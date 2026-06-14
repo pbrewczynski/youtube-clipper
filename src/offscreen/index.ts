@@ -9,10 +9,10 @@ import {
 type TrimJob = {
 	type: 'TRIM_JOB';
 	jobId: string;
-	videoUrl: string;
-	audioUrl?: string;
-	start: number;
-	end: number;
+	videoData: Uint8Array;
+	audioData?: Uint8Array;
+	trimStartOffset: number;
+	duration: number;
 	mode: TrimEncodeMode;
 };
 
@@ -69,55 +69,6 @@ function post(message: TrimProgress | TrimComplete | TrimError) {
 	chrome.runtime.sendMessage(message);
 }
 
-function assertFetchableUrl(url: string) {
-	try {
-		const parsed = new URL(url);
-		if (!['http:', 'https:'].includes(parsed.protocol)) {
-			throw new Error('Invalid URL');
-		}
-	} catch {
-		throw new Error('Invalid stream URL — refresh the page, play the video briefly, then retry.');
-	}
-}
-
-async function fetchStream(url: string, onProgress: (percent: number) => void): Promise<Uint8Array> {
-	assertFetchableUrl(url);
-	const response = await fetch(url, {
-		headers: { Referer: 'https://www.youtube.com/', Origin: 'https://www.youtube.com' },
-	});
-	if (!response.ok) {
-		throw new Error(`Failed to download stream (${response.status})`);
-	}
-
-	const reader = response.body?.getReader();
-	if (!reader) {
-		return new Uint8Array(await response.arrayBuffer());
-	}
-
-	const contentLength = parseInt(response.headers.get('content-length') ?? '0', 10);
-	const chunks: Uint8Array[] = [];
-	let received = 0;
-
-	while (true) {
-		const { done, value } = await reader.read();
-		if (done) break;
-		chunks.push(value);
-		received += value.length;
-		if (contentLength > 0) {
-			onProgress(Math.min(99, Math.round((received / contentLength) * 100)));
-		}
-	}
-
-	const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-	const merged = new Uint8Array(total);
-	let offset = 0;
-	for (const chunk of chunks) {
-		merged.set(chunk, offset);
-		offset += chunk.length;
-	}
-	return merged;
-}
-
 async function runFfmpeg(ff: FFmpeg, args: string[]) {
 	await ff.exec(args);
 	const output = await ff.readFile('output.mp4');
@@ -135,30 +86,10 @@ async function cleanupFiles(ff: FFmpeg, files: string[]) {
 }
 
 async function processTrimJob(job: TrimJob) {
-	const { jobId, videoUrl, audioUrl, start, end, mode } = job;
-	const duration = Math.max(0.1, end - start);
+	const { jobId, videoData, audioData, trimStartOffset, duration, mode } = job;
 	const tempFiles = ['output.mp4'];
 
 	try {
-		post({ type: 'TRIM_PROGRESS', jobId, phase: 'downloading', percent: 0, message: 'Downloading video…' });
-
-		const videoData = await fetchStream(videoUrl, (percent) => {
-			post({ type: 'TRIM_PROGRESS', jobId, phase: 'downloading', percent, message: `Downloading… ${percent}%` });
-		});
-
-		let audioData: Uint8Array | null = null;
-		if (audioUrl) {
-			audioData = await fetchStream(audioUrl, (percent) => {
-				post({
-					type: 'TRIM_PROGRESS',
-					jobId,
-					phase: 'downloading',
-					percent,
-					message: `Downloading audio… ${percent}%`,
-				});
-			});
-		}
-
 		post({
 			type: 'TRIM_PROGRESS',
 			jobId,
@@ -170,7 +101,7 @@ async function processTrimJob(job: TrimJob) {
 		const ff = await ensureFfmpeg();
 		const { inputFiles, args } = buildTrimFfmpegArgs({
 			mode,
-			start,
+			start: trimStartOffset,
 			duration,
 			hasAudioTrack: !!audioData,
 		});
