@@ -450,6 +450,7 @@ export class TrimmerOverlay {
 	private onKeyDown: ((e: KeyboardEvent) => void) | null = null;
 	private storyboardInfo: StoryboardInfo | null = null;
 	private exportMode: 'bridge' | 'playback' = 'bridge';
+	private transcriptObserver: MutationObserver | null = null;
 
 	private els: Record<string, HTMLElement> = {};
 
@@ -465,6 +466,7 @@ export class TrimmerOverlay {
 		this.updateUI();
 		this.startPlayheadLoop();
 		void this.refreshStreamStatus();
+		this.initTranscriptSync();
 
 		this.video?.addEventListener(
 			'loadedmetadata',
@@ -475,6 +477,56 @@ export class TrimmerOverlay {
 			},
 			{ once: true }
 		);
+	}
+
+	private initTranscriptSync() {
+		if (this.transcriptObserver) return;
+
+		const findTime = (el: HTMLElement): number | null => {
+			const timeStr = el.querySelector('.segment-timestamp, #timestamp')?.textContent?.trim();
+			if (!timeStr) return null;
+			const parts = timeStr.split(':').map(Number);
+			if (parts.length === 2) return parts[0] * 60 + parts[1];
+			if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+			return null;
+		};
+
+		const handleTranscriptClick = (e: MouseEvent) => {
+			if (!this.visible) return;
+			const segment = (e.target as HTMLElement).closest('ytd-transcript-segment-renderer, .transcript-segment');
+			if (!segment) return;
+
+			const time = findTime(segment as HTMLElement);
+			if (time === null) return;
+
+			// If user is holding shift, set Out point, else set In point
+			if (e.shiftKey) {
+				this.range.end = Math.min(this.duration, Math.max(time + 2, this.range.start + 0.5));
+			} else {
+				this.range.start = Math.max(0, Math.min(time, this.range.end - 0.5));
+				this.seekTo(this.range.start);
+			}
+			this.updateUI();
+		};
+
+		// Global listener for transcript clicks (they are often deep in the DOM)
+		document.addEventListener('click', handleTranscriptClick, true);
+
+		// Also look for selection-based transcript trimming
+		this.transcriptObserver = new MutationObserver(() => {
+			const transcript = document.querySelector('ytd-transcript-renderer');
+			if (!transcript) return;
+			
+			// Add a hint to segments
+			transcript.querySelectorAll('ytd-transcript-segment-renderer').forEach(seg => {
+				(seg as HTMLElement).title = 'Click to set Start, Shift+Click to set End';
+			});
+		});
+
+		const sidePanel = document.querySelector('#secondary');
+		if (sidePanel) {
+			this.transcriptObserver.observe(sidePanel, { childList: true, subtree: true });
+		}
 	}
 
 	private populateTimeline() {
