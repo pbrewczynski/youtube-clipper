@@ -110,12 +110,12 @@ export function initExportListener() {
 	});
 }
 
-async function tryYtDlpBridge(videoId: string, start: number, end: number, filename: string): Promise<boolean> {
+async function tryYtDlpBridge(videoId: string, start: number, end: number, filename: string, duration?: number): Promise<boolean> {
 	try {
 		const response = await fetch('http://localhost:5005/trim', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ videoId, start, end, filename }),
+			body: JSON.stringify({ videoId, start, end, filename, duration }),
 		});
 		if (!response.ok) return false;
 		const result = await response.json();
@@ -148,7 +148,7 @@ export async function handleExportTrim(request: ExportTrimRequest): Promise<Expo
 		message: 'Checking for local yt-dlp bridge…',
 	});
 
-	if (await tryYtDlpBridge(videoId, start, end, filename)) {
+	if (await tryYtDlpBridge(videoId, start, end, filename, request.duration)) {
 		sendResult(tabId, { type: 'EXPORT_TRIM_RESULT', success: true });
 		return { type: 'EXPORT_TRIM_RESULT', success: true };
 	}

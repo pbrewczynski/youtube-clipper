@@ -81,6 +81,7 @@ class BridgeHandler(http.server.BaseHTTPRequestHandler):
             start = data.get('start', 0)
             end = data.get('end', 10)
             filename = data.get('filename', 'clip.mp4')
+            duration = data.get('duration')
 
             if not video_id:
                 self.send_error(400, "Missing videoId")
@@ -91,43 +92,115 @@ class BridgeHandler(http.server.BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
 
-            # Run yt-dlp
-            # yt-dlp --download-sections "*8:13-8:45" "https://www.youtube.com/watch?v=BScdjYYW8-g"
             url = f"https://www.youtube.com/watch?v={video_id}"
-            section = f"*{start}-{end}"
             
-            with tempfile.TemporaryDirectory() as tmpdir:
-                output_template = os.path.join(tmpdir, "out.%(ext)s")
-                cmd = [
-                    "yt-dlp",
-                    *build_cookies_arg(FIREFOX_PROFILE_NAME),
-                    "--download-sections", section,
-                    "--force-keyframes-at-cuts",
-                    "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-                    "-o", output_template,
-                    url
-                ]
-                
-                print(f"Running: {' '.join(cmd)}")
-                try:
+            CACHE_DIR = os.path.expanduser("~/.cache/youtube-clipper")
+            os.makedirs(CACHE_DIR, exist_ok=True)
+            
+            valid_extensions = {".mp4", ".mkv", ".webm", ".m4v"}
+            cached_file = None
+            for f in glob.glob(os.path.join(CACHE_DIR, f"{video_id}.*")):
+                ext = os.path.splitext(f)[1].lower()
+                if ext in valid_extensions:
+                    cached_file = f
+                    break
+
+            try:
+                downloads_path = os.path.expanduser("~/Downloads")
+                final_path = os.path.join(downloads_path, filename)
+
+                if cached_file:
+                    print(f"Cache hit! Found cached full video for {video_id} at {cached_file}")
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        produced_file = os.path.join(tmpdir, "sliced.mp4")
+                        
+                        # Use ffmpeg to slice and re-encode to clean MP4
+                        ffmpeg_cmd = [
+                            "ffmpeg", "-y",
+                            "-ss", str(start),
+                            "-to", str(end),
+                            "-i", cached_file,
+                            "-c:v", "libx264",
+                            "-c:a", "aac",
+                            "-preset", "veryfast",
+                            "-crf", "22",
+                            produced_file
+                        ]
+                        print(f"Running ffmpeg: {' '.join(ffmpeg_cmd)}")
+                        subprocess.run(ffmpeg_cmd, check=True)
+                        
+                        shutil.move(produced_file, final_path)
+                        response = {"success": True, "path": final_path, "cached": True}
+                        self.wfile.write(json.dumps(response).encode())
+                        return
+
+                # If not cached, check if we are downloading the entire video
+                is_entire = False
+                if duration is not None:
+                    clip_len = end - start
+                    # If clip length covers at least 98% of duration or start/end covers the full video
+                    if clip_len >= duration - 2 or (start == 0 and end >= duration - 2):
+                        is_entire = True
+
+                if is_entire:
+                    print(f"Downloading entire video for {video_id} to cache...")
+                    output_template = os.path.join(CACHE_DIR, f"{video_id}.%(ext)s")
+                    cmd = [
+                        "yt-dlp",
+                        *build_cookies_arg(FIREFOX_PROFILE_NAME),
+                        "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+                        "-o", output_template,
+                        url
+                    ]
+                    print(f"Running: {' '.join(cmd)}")
                     subprocess.run(cmd, check=True)
-                    # Find the produced file
-                    files = os.listdir(tmpdir)
-                    if not files:
-                        raise Exception("yt-dlp produced no files")
-                    
-                    produced_file = os.path.join(tmpdir, files[0])
-                    # Move to downloads folder (simple assumption for now, or just let the user know)
-                    downloads_path = os.path.expanduser("~/Downloads")
-                    final_path = os.path.join(downloads_path, filename)
-                    shutil.move(produced_file, final_path)
-                    
-                    response = {"success": True, "path": final_path}
+
+                    # Find the downloaded file
+                    new_cached_file = None
+                    for f in glob.glob(os.path.join(CACHE_DIR, f"{video_id}.*")):
+                        ext = os.path.splitext(f)[1].lower()
+                        if ext in valid_extensions:
+                            new_cached_file = f
+                            break
+
+                    if not new_cached_file:
+                        raise Exception("yt-dlp completed but cached file not found")
+
+                    # Copy it to Downloads folder
+                    shutil.copy2(new_cached_file, final_path)
+                    response = {"success": True, "path": final_path, "cached": True}
                     self.wfile.write(json.dumps(response).encode())
-                except Exception as e:
-                    print(f"Error: {e}")
-                    response = {"success": False, "error": str(e)}
-                    self.wfile.write(json.dumps(response).encode())
+                else:
+                    # Download section only (no caching of full video)
+                    print(f"Downloading section {start}-{end} for {video_id}...")
+                    section = f"*{start}-{end}"
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        output_template = os.path.join(tmpdir, "out.%(ext)s")
+                        cmd = [
+                            "yt-dlp",
+                            *build_cookies_arg(FIREFOX_PROFILE_NAME),
+                            "--download-sections", section,
+                            "--force-keyframes-at-cuts",
+                            "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+                            "-o", output_template,
+                            url
+                        ]
+                        print(f"Running: {' '.join(cmd)}")
+                        subprocess.run(cmd, check=True)
+
+                        files = os.listdir(tmpdir)
+                        if not files:
+                            raise Exception("yt-dlp produced no files")
+
+                        produced_file = os.path.join(tmpdir, files[0])
+                        shutil.move(produced_file, final_path)
+                        response = {"success": True, "path": final_path, "cached": False}
+                        self.wfile.write(json.dumps(response).encode())
+
+            except Exception as e:
+                print(f"Error: {e}")
+                response = {"success": False, "error": str(e)}
+                self.wfile.write(json.dumps(response).encode())
 
         else:
             self.send_error(404)
