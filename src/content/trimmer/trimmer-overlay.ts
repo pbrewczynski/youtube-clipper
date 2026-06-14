@@ -16,6 +16,7 @@ import { stopClipPlayback } from '../clip-playback';
 
 type TranscriptSegment = {
 	start: number;
+	end: number;
 	duration: number;
 	text: string;
 };
@@ -433,61 +434,232 @@ const STYLES = `
 	transition: width 0.2s;
 }
 
+.transcript-toolbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 8px;
+	min-height: 28px;
+}
+
+.transcript-toolbar-hint {
+	font-size: 11px;
+	color: rgba(255, 255, 255, 0.42);
+	line-height: 1.3;
+}
+
+.transcript-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	padding: 4px;
+	border-radius: 999px;
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	background: rgba(0, 0, 0, 0.28);
+	cursor: pointer;
+	transition: background 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
+}
+
+.transcript-toggle:disabled {
+	opacity: 0.35;
+	cursor: not-allowed;
+}
+
+.transcript-toggle-label {
+	font-size: 11px;
+	font-weight: 600;
+	color: rgba(255, 255, 255, 0.72);
+	padding-right: 4px;
+	user-select: none;
+}
+
+.transcript-toggle-track {
+	position: relative;
+	width: 38px;
+	height: 22px;
+	border-radius: 999px;
+	background: rgba(255, 255, 255, 0.14);
+	transition: background 0.2s ease;
+}
+
+.transcript-toggle.on .transcript-toggle-track {
+	background: rgba(255, 214, 10, 0.35);
+}
+
+.transcript-toggle-thumb {
+	position: absolute;
+	top: 2px;
+	left: 2px;
+	width: 18px;
+	height: 18px;
+	border-radius: 50%;
+	background: #fff;
+	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+	transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.transcript-toggle.on .transcript-toggle-thumb {
+	transform: translateX(16px);
+	background: #ffd60a;
+}
+
+.transcript-panel {
+	display: none;
+	flex-direction: column;
+	margin-bottom: 12px;
+	border-radius: 12px;
+	overflow: hidden;
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	background: linear-gradient(180deg, rgba(18, 18, 20, 0.92) 0%, rgba(10, 10, 12, 0.96) 100%);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+	animation: transcriptReveal 0.24s ease;
+}
+
+.transcript-panel.visible {
+	display: flex;
+}
+
+@keyframes transcriptReveal {
+	from {
+		opacity: 0;
+		transform: translateY(6px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+.transcript-panel-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 8px 12px 6px;
+	border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.transcript-panel-title {
+	font-size: 10px;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: rgba(255, 255, 255, 0.45);
+}
+
+.transcript-panel-count {
+	font-size: 10px;
+	font-variant-numeric: tabular-nums;
+	color: rgba(255, 255, 255, 0.35);
+}
+
 .transcript-box {
 	display: flex;
 	flex-direction: column;
-	max-height: 90px;
-	margin-bottom: 12px;
-	background: rgba(0, 0, 0, 0.45);
-	border: 1px solid rgba(255, 255, 255, 0.08);
-	border-radius: 8px;
+	max-height: 132px;
 	overflow-y: auto;
-	padding: 6px 10px;
-	gap: 6px;
+	padding: 6px;
+	gap: 4px;
 	scrollbar-width: thin;
-	scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+	scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
 
 .transcript-box::-webkit-scrollbar {
-	width: 4px;
+	width: 5px;
 }
 .transcript-box::-webkit-scrollbar-thumb {
-	background: rgba(255, 255, 255, 0.15);
-	border-radius: 2px;
+	background: rgba(255, 255, 255, 0.18);
+	border-radius: 3px;
 }
 
 .transcript-line {
-	display: flex;
-	align-items: flex-start;
-	gap: 8px;
-	font-size: 11px;
-	color: rgba(255, 255, 255, 0.6);
+	display: grid;
+	grid-template-columns: auto 1fr;
+	gap: 10px;
+	align-items: start;
+	padding: 8px 10px;
+	border-radius: 8px;
+	font-size: 12px;
+	color: rgba(255, 255, 255, 0.72);
 	cursor: pointer;
-	line-height: 1.4;
-	transition: color 0.15s ease;
+	line-height: 1.45;
+	transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, transform 0.12s ease;
 	user-select: none;
 	text-align: left;
+	border: 1px solid transparent;
+	-webkit-tap-highlight-color: transparent;
+	touch-action: manipulation;
 }
 
 .transcript-line:hover {
 	color: #fff;
+	background: rgba(255, 255, 255, 0.06);
+	border-color: rgba(255, 255, 255, 0.08);
 }
 
 .transcript-line.active {
+	color: #fff;
+	background: rgba(255, 255, 255, 0.05);
+	border-color: rgba(255, 255, 255, 0.1);
+}
+
+.transcript-line.active .transcript-line-time {
 	color: #ffd60a;
-	font-weight: 500;
+}
+
+.transcript-line.in-selection {
+	background: rgba(255, 214, 10, 0.08);
+	border-color: rgba(255, 214, 10, 0.22);
+}
+
+.transcript-line.picked {
+	background: rgba(255, 214, 10, 0.16);
+	border-color: rgba(255, 214, 10, 0.45);
+	box-shadow: 0 0 0 1px rgba(255, 214, 10, 0.12);
+	color: #fff;
+}
+
+.transcript-line.picked .transcript-line-time {
+	color: #ffd60a;
 }
 
 .transcript-line-time {
-	font-family: ui-monospace, monospace;
-	opacity: 0.5;
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-size: 10px;
+	font-weight: 600;
+	color: rgba(255, 255, 255, 0.42);
 	flex-shrink: 0;
+	padding-top: 1px;
+	white-space: nowrap;
 }
 
 .transcript-line-text {
 	word-break: break-word;
 }
+
+.transcript-empty {
+	padding: 14px 12px;
+	font-size: 12px;
+	color: rgba(255, 255, 255, 0.45);
+	text-align: center;
+}
 `;
+
+function finalizeTranscriptSegments(
+	segments: Array<{ start: number; duration: number; text: string }>,
+	duration: number,
+): TranscriptSegment[] {
+	return segments.map((seg, index) => {
+		const nextStart = segments[index + 1]?.start;
+		const inferredEnd = nextStart ?? (seg.duration > 0 ? seg.start + seg.duration : seg.start + 3);
+		const end = Math.min(duration > 0 ? duration : inferredEnd, Math.max(inferredEnd, seg.start + 0.5));
+		return {
+			start: seg.start,
+			end,
+			duration: Math.max(0.5, end - seg.start),
+			text: seg.text,
+		};
+	});
+}
 
 function formatTime(seconds: number): string {
 	if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
@@ -520,6 +692,9 @@ export class TrimmerOverlay {
 	private transcriptObserver: MutationObserver | null = null;
 	private transcriptSegments: TranscriptSegment[] | null = null;
 	private activeTranscriptIndex = -1;
+	private pickedTranscriptIndex = -1;
+	private showTranscript = false;
+	private transcriptAvailable = false;
 
 	private onVideoPlay = () => {
 		this.previewing = true;
@@ -642,7 +817,7 @@ export class TrimmerOverlay {
 			
 			if (!data?.events) return null;
 
-			const segments: TranscriptSegment[] = [];
+			const rawSegments: Array<{ start: number; duration: number; text: string }> = [];
 			for (const event of data.events) {
 				if (!event.segs || event.segs.length === 0) continue;
 				
@@ -657,10 +832,10 @@ export class TrimmerOverlay {
 				const start = (event.tStartMs || 0) / 1000;
 				const duration = (event.dDurationMs || 0) / 1000;
 				
-				segments.push({ start, duration, text });
+				rawSegments.push({ start, duration, text });
 			}
 
-			return segments;
+			return finalizeTranscriptSegments(rawSegments, this.duration);
 		} catch (err) {
 			console.warn('Failed to fetch transcript:', err);
 			return null;
@@ -668,7 +843,7 @@ export class TrimmerOverlay {
 	}
 
 	private scrapeTranscriptFromDOM(): TranscriptSegment[] | null {
-		const segments: TranscriptSegment[] = [];
+		const segments: Array<{ start: number; duration: number; text: string }> = [];
 		const segElements = document.querySelectorAll('ytd-transcript-segment-renderer, .transcript-segment');
 		if (segElements.length === 0) return null;
 
@@ -685,17 +860,78 @@ export class TrimmerOverlay {
 			const start = findTime(el as HTMLElement);
 			if (start === null) return;
 			const text = el.querySelector('.segment-text, #text')?.textContent?.trim() || '';
-			segments.push({ start, duration: 2, text });
+			segments.push({ start, duration: 0, text });
 		});
 
-		return segments.length > 0 ? segments : null;
+		return segments.length > 0 ? finalizeTranscriptSegments(segments, this.duration) : null;
+	}
+
+	private updateTranscriptToggleUI() {
+		const toggle = this.els['transcript-toggle'] as HTMLButtonElement | undefined;
+		const hint = this.els['transcript-toolbar-hint'] as HTMLElement | undefined;
+		const panel = this.els['transcript-panel'] as HTMLElement | undefined;
+		const count = this.els['transcript-count'] as HTMLElement | undefined;
+
+		if (!toggle || !hint || !panel) return;
+
+		toggle.classList.toggle('on', this.showTranscript);
+		toggle.disabled = !this.transcriptAvailable;
+		panel.classList.toggle('visible', this.showTranscript && this.transcriptAvailable);
+
+		if (count) {
+			count.textContent = this.transcriptSegments?.length
+				? `${this.transcriptSegments.length} lines`
+				: '';
+		}
+
+		if (!this.transcriptAvailable) {
+			hint.textContent = 'No transcript available for this video';
+			return;
+		}
+
+		hint.textContent = this.showTranscript
+			? 'Tap a line to set In and Out to that caption'
+			: 'Show transcript to pick a clip by caption';
+	}
+
+	private updateTranscriptHighlights() {
+		if (!this.transcriptSegments || !this.showTranscript) return;
+
+		const lines = this.els['transcript-box']?.children;
+		if (!lines) return;
+
+		for (let i = 0; i < this.transcriptSegments.length; i++) {
+			const line = lines[i] as HTMLElement | undefined;
+			const seg = this.transcriptSegments[i];
+			if (!line) continue;
+
+			const overlapsSelection = seg.start < this.range.end && seg.end > this.range.start;
+			line.classList.toggle('in-selection', overlapsSelection);
+			line.classList.toggle('picked', i === this.pickedTranscriptIndex);
+		}
+	}
+
+	private applyTranscriptLine(index: number) {
+		if (!this.transcriptSegments || index < 0 || index >= this.transcriptSegments.length) return;
+
+		const seg = this.transcriptSegments[index];
+		this.pickedTranscriptIndex = index;
+		this.range.start = Math.max(0, seg.start);
+		this.range.end = Math.min(
+			this.duration || seg.end,
+			Math.max(seg.end, this.range.start + 0.5),
+		);
+		this.seekTo(this.range.start);
+		this.updateUI();
 	}
 
 	private async loadTranscript() {
 		this.transcriptSegments = null;
 		this.activeTranscriptIndex = -1;
-		this.els['transcript-box'].style.display = 'none';
+		this.pickedTranscriptIndex = -1;
+		this.transcriptAvailable = false;
 		this.els['transcript-box'].innerHTML = '';
+		this.updateTranscriptToggleUI();
 
 		const response = getPlayerResponse();
 		let segments = await this.fetchTranscript(response);
@@ -705,17 +941,20 @@ export class TrimmerOverlay {
 
 		if (segments && segments.length > 0) {
 			this.transcriptSegments = segments;
-			
+			this.transcriptAvailable = true;
+
 			const fragment = document.createDocumentFragment();
-			segments.forEach((seg) => {
+			segments.forEach((seg, index) => {
 				const line = document.createElement('div');
 				line.className = 'transcript-line';
+				line.dataset.index = String(index);
 				line.dataset.start = String(seg.start);
-				line.dataset.duration = String(seg.duration);
+				line.dataset.end = String(seg.end);
+				line.title = `${formatTime(seg.start)} – ${formatTime(seg.end)}`;
 				
 				const timeSpan = document.createElement('span');
 				timeSpan.className = 'transcript-line-time';
-				timeSpan.textContent = formatTime(seg.start);
+				timeSpan.textContent = `${formatTime(seg.start)}–${formatTime(seg.end)}`;
 				
 				const textSpan = document.createElement('span');
 				textSpan.className = 'transcript-line-text';
@@ -727,8 +966,10 @@ export class TrimmerOverlay {
 			});
 
 			this.els['transcript-box'].appendChild(fragment);
-			this.els['transcript-box'].style.display = 'flex';
 		}
+
+		this.updateTranscriptToggleUI();
+		this.updateTranscriptHighlights();
 	}
 
 	private populateTimeline() {
@@ -854,7 +1095,22 @@ export class TrimmerOverlay {
 						<div class="time-current">0:00</div>
 						<div class="time-meta">Duration: <span data-el="clip-duration">0:00</span></div>
 					</div>
-					<div class="transcript-box" data-el="transcript-box" style="display: none;"></div>
+					<div class="transcript-toolbar">
+						<div class="transcript-toolbar-hint" data-el="transcript-toolbar-hint">Loading transcript…</div>
+						<button class="transcript-toggle" data-action="toggle-transcript" data-el="transcript-toggle" type="button" disabled>
+							<span class="transcript-toggle-label">Transcript</span>
+							<span class="transcript-toggle-track">
+								<span class="transcript-toggle-thumb"></span>
+							</span>
+						</button>
+					</div>
+					<div class="transcript-panel" data-el="transcript-panel">
+						<div class="transcript-panel-header">
+							<span class="transcript-panel-title">Captions</span>
+							<span class="transcript-panel-count" data-el="transcript-count"></span>
+						</div>
+						<div class="transcript-box" data-el="transcript-box"></div>
+					</div>
 					<div class="timeline-wrap" data-el="timeline">
 						<div class="timeline-track"></div>
 						<div class="selection" data-el="selection"></div>
@@ -912,15 +1168,9 @@ export class TrimmerOverlay {
 		this.els['transcript-box'].addEventListener('click', (e) => {
 			const line = (e.target as HTMLElement).closest('.transcript-line') as HTMLElement;
 			if (!line) return;
-			const start = parseFloat(line.dataset.start || '0');
-			const duration = parseFloat(line.dataset.duration || '2');
-			if (e.shiftKey) {
-				this.range.end = Math.min(this.duration, Math.max(start + duration, this.range.start + 0.5));
-			} else {
-				this.range.start = Math.max(0, Math.min(start, this.range.end - 0.5));
-				this.seekTo(this.range.start);
-			}
-			this.updateUI();
+			e.stopPropagation();
+			const index = Number.parseInt(line.dataset.index || '-1', 10);
+			this.applyTranscriptLine(index);
 		});
 
 		overlay.addEventListener('click', (e) => {
@@ -930,6 +1180,11 @@ export class TrimmerOverlay {
 				if (action === 'cancel') this.hide();
 				if (action === 'export') this.export();
 				if (action === 'play-selection') this.togglePreview();
+				if (action === 'toggle-transcript' && this.transcriptAvailable) {
+					this.showTranscript = !this.showTranscript;
+					this.updateTranscriptToggleUI();
+					this.updateTranscriptHighlights();
+				}
 				return;
 			}
 
@@ -1219,6 +1474,7 @@ export class TrimmerOverlay {
 		this.els['out-label'].textContent = formatTime(this.range.end);
 		this.els['clip-duration'].textContent = formatTime(this.range.end - this.range.start);
 		this.els.timeCurrent.textContent = formatTime(this.currentTime);
+		this.updateTranscriptHighlights();
 	}
 
 	private startPlayheadLoop() {
@@ -1233,11 +1489,11 @@ export class TrimmerOverlay {
 				this.updateUI();
 
 				// Highlight and auto-scroll transcript line
-				if (this.transcriptSegments && this.transcriptSegments.length > 0 && this.els['transcript-box'].style.display !== 'none') {
+				if (this.transcriptSegments && this.transcriptSegments.length > 0 && this.showTranscript) {
 					let activeIndex = -1;
 					for (let i = 0; i < this.transcriptSegments.length; i++) {
 						const seg = this.transcriptSegments[i];
-						if (this.currentTime >= seg.start && this.currentTime < seg.start + seg.duration) {
+						if (this.currentTime >= seg.start && this.currentTime < seg.end) {
 							activeIndex = i;
 							break;
 						}
