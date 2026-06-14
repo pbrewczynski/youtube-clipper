@@ -13,6 +13,7 @@ import {
 import type { StoryboardInfo } from '../../utils/youtube-player';
 import { recordSelection } from './record-fallback';
 import { stopClipPlayback } from '../clip-playback';
+import { loadVideoTranscript } from './transcript-fetch';
 
 type TranscriptSegment = {
 	start: number;
@@ -695,6 +696,7 @@ export class TrimmerOverlay {
 	private pickedTranscriptIndex = -1;
 	private showTranscript = false;
 	private transcriptAvailable = false;
+	private transcriptFailureReason: string | null = null;
 
 	private onVideoPlay = () => {
 		this.previewing = true;
@@ -787,85 +789,6 @@ export class TrimmerOverlay {
 		}
 	}
 
-	private async fetchTranscript(playerResponse: any): Promise<TranscriptSegment[] | null> {
-		try {
-			const captionTracks = playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-			if (!captionTracks || captionTracks.length === 0) return null;
-
-			const track = captionTracks.find((t: any) => t.languageCode === 'en' && !t.kind) ||
-			              captionTracks.find((t: any) => t.languageCode === 'en') ||
-			              captionTracks[0];
-
-			if (!track?.baseUrl) return null;
-
-			const url = track.baseUrl + '&fmt=json3';
-			const res = await fetch(url);
-			if (!res.ok) return null;
-			const text = await res.text();
-			if (!text || !text.trim()) {
-				console.log('[fetchTranscript] Empty response received from timedtext API.');
-				return null;
-			}
-
-			let data;
-			try {
-				data = JSON.parse(text);
-			} catch (parseErr) {
-				console.warn('[fetchTranscript] Failed to parse timedtext JSON response:', parseErr);
-				return null;
-			}
-			
-			if (!data?.events) return null;
-
-			const rawSegments: Array<{ start: number; duration: number; text: string }> = [];
-			for (const event of data.events) {
-				if (!event.segs || event.segs.length === 0) continue;
-				
-				const text = event.segs
-					.map((s: any) => s.utf8)
-					.join('')
-					.replace(/\n/g, ' ')
-					.trim();
-
-				if (!text) continue;
-
-				const start = (event.tStartMs || 0) / 1000;
-				const duration = (event.dDurationMs || 0) / 1000;
-				
-				rawSegments.push({ start, duration, text });
-			}
-
-			return finalizeTranscriptSegments(rawSegments, this.duration);
-		} catch (err) {
-			console.warn('Failed to fetch transcript:', err);
-			return null;
-		}
-	}
-
-	private scrapeTranscriptFromDOM(): TranscriptSegment[] | null {
-		const segments: Array<{ start: number; duration: number; text: string }> = [];
-		const segElements = document.querySelectorAll('ytd-transcript-segment-renderer, .transcript-segment');
-		if (segElements.length === 0) return null;
-
-		const findTime = (el: HTMLElement): number | null => {
-			const timeStr = el.querySelector('.segment-timestamp, #timestamp')?.textContent?.trim();
-			if (!timeStr) return null;
-			const parts = timeStr.split(':').map(Number);
-			if (parts.length === 2) return parts[0] * 60 + parts[1];
-			if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-			return null;
-		};
-
-		segElements.forEach((el) => {
-			const start = findTime(el as HTMLElement);
-			if (start === null) return;
-			const text = el.querySelector('.segment-text, #text')?.textContent?.trim() || '';
-			segments.push({ start, duration: 0, text });
-		});
-
-		return segments.length > 0 ? finalizeTranscriptSegments(segments, this.duration) : null;
-	}
-
 	private updateTranscriptToggleUI() {
 		const toggle = this.els['transcript-toggle'] as HTMLButtonElement | undefined;
 		const hint = this.els['transcript-toolbar-hint'] as HTMLElement | undefined;
@@ -885,9 +808,12 @@ export class TrimmerOverlay {
 		}
 
 		if (!this.transcriptAvailable) {
-			hint.textContent = 'No transcript available for this video';
+			hint.textContent = this.transcriptFailureReason ?? 'No transcript available for this video';
+			hint.title = this.transcriptFailureReason ?? '';
 			return;
 		}
+
+		hint.title = '';
 
 		hint.textContent = this.showTranscript
 			? 'Tap a line to set In and Out to that caption'
@@ -930,13 +856,18 @@ export class TrimmerOverlay {
 		this.activeTranscriptIndex = -1;
 		this.pickedTranscriptIndex = -1;
 		this.transcriptAvailable = false;
+		this.transcriptFailureReason = null;
 		this.els['transcript-box'].innerHTML = '';
 		this.updateTranscriptToggleUI();
 
-		const response = getPlayerResponse();
-		let segments = await this.fetchTranscript(response);
-		if (!segments) {
-			segments = this.scrapeTranscriptFromDOM();
+		const videoId = getVideoIdFromUrl(window.location.href) ?? '';
+		const result = await loadVideoTranscript(getPlayerResponse(), videoId);
+		const segments = result.segments
+			? finalizeTranscriptSegments(result.segments, this.duration)
+			: null;
+
+		if (!segments?.length) {
+			this.transcriptFailureReason = result.failureReason;
 		}
 
 		if (segments && segments.length > 0) {
