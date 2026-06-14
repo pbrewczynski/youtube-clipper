@@ -5,7 +5,10 @@ import {
 	getVideoTitle,
 	hasUsableStreams,
 	resolveStreamUrls,
+	parseStoryboard,
+	getStoryboardTileUrl,
 } from './trimmer-utils';
+import type { StoryboardInfo } from '../../utils/youtube-player';
 import { recordSelection } from './record-fallback';
 import { stopClipPlayback } from '../clip-playback';
 
@@ -242,6 +245,46 @@ const STYLES = `
 	transition: transform 0.12s ease;
 }
 
+.thumbnail-preview {
+	position: absolute;
+	bottom: calc(100% + 12px);
+	left: 0;
+	transform: translateX(-50%);
+	background: #000;
+	border: 2px solid #fff;
+	border-radius: 4px;
+	pointer-events: none;
+	opacity: 0;
+	transition: opacity 0.1s ease;
+	z-index: 10;
+	box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	overflow: hidden;
+}
+
+.thumbnail-preview.visible {
+	opacity: 1;
+}
+
+.thumbnail-image {
+	display: block;
+	background-color: #222;
+	background-repeat: no-repeat;
+}
+
+.thumbnail-time {
+	position: absolute;
+	bottom: 4px;
+	background: rgba(0,0,0,0.7);
+	color: #fff;
+	padding: 2px 6px;
+	border-radius: 4px;
+	font-size: 11px;
+	font-variant-numeric: tabular-nums;
+}
+
 .playhead.scrubbing .playhead-knob {
 	transform: scale(1.25);
 }
@@ -347,6 +390,7 @@ export class TrimmerOverlay {
 	private exportListener: ((message: { type?: string }) => void) | null = null;
 	private rafId = 0;
 	private onKeyDown: ((e: KeyboardEvent) => void) | null = null;
+	private storyboardInfo: StoryboardInfo | null = null;
 
 	private els: Record<string, HTMLElement> = {};
 
@@ -417,6 +461,7 @@ export class TrimmerOverlay {
 			start: 0,
 			end: Math.min(30, this.duration || 30),
 		};
+		this.storyboardInfo = parseStoryboard();
 
 		this.host = document.createElement('div');
 		this.host.id = 'yt-clipper-trimmer';
@@ -444,6 +489,10 @@ export class TrimmerOverlay {
 						<div class="time-meta">Duration: <span data-el="clip-duration">0:00</span></div>
 					</div>
 					<div class="timeline-wrap" data-el="timeline">
+						<div class="thumbnail-preview" data-el="thumbnail-preview">
+							<div class="thumbnail-image" data-el="thumbnail-image"></div>
+							<div class="thumbnail-time" data-el="thumbnail-time">0:00</div>
+						</div>
 						<div class="timeline-track"></div>
 						<div class="dim-left" data-el="dim-left"></div>
 						<div class="dim-right" data-el="dim-right"></div>
@@ -492,18 +541,22 @@ export class TrimmerOverlay {
 			if (action === 'play-selection') this.togglePreview();
 		});
 
-		overlay.addEventListener('mousedown', (e) => this.onPointerDown(e.clientX, e.target as HTMLElement, e.shiftKey));
+		overlay.addEventListener('mousedown', (e) => {
+			if (e.target !== overlay) e.stopPropagation();
+			this.onPointerDown(e.clientX, e.target as HTMLElement, e.shiftKey);
+		});
 		overlay.addEventListener('touchstart', (e) => {
+			if (e.target !== overlay) e.stopPropagation();
 			const touch = e.touches[0];
 			this.onPointerDown(touch.clientX, e.target as HTMLElement, e.shiftKey);
 		}, { passive: true });
 
-		const onMove = (clientX: number) => this.onPointerMove(clientX);
+		const onMove = (clientX: number, target?: HTMLElement) => this.onPointerMove(clientX, target);
 		const onUp = () => this.onPointerUp();
 
-		window.addEventListener('mousemove', (e) => onMove(e.clientX));
+		window.addEventListener('mousemove', (e) => onMove(e.clientX, e.target as HTMLElement));
 		window.addEventListener('mouseup', onUp);
-		window.addEventListener('touchmove', (e) => onMove(e.touches[0].clientX), { passive: true });
+		window.addEventListener('touchmove', (e) => onMove(e.touches[0].clientX, e.target as HTMLElement), { passive: true });
 		window.addEventListener('touchend', onUp);
 
 		this.onKeyDown = (e: KeyboardEvent) => {
@@ -621,11 +674,20 @@ export class TrimmerOverlay {
 		this.els.selection.classList.add('dragging');
 	}
 
-	private onPointerMove(clientX: number) {
-		if (!this.dragTarget) return;
+	private onPointerMove(clientX: number, target?: HTMLElement) {
 		const rect = this.els.timeline.getBoundingClientRect();
 		const percent = Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100));
 		const time = this.percentToTime(percent);
+
+		// Handle hover thumbnail
+		const isHoveringTimeline = target && (this.els.timeline.contains(target) || target === this.els.timeline);
+		if ((isHoveringTimeline || this.dragTarget) && clientX >= rect.left && clientX <= rect.right) {
+			this.updateThumbnail(percent, time);
+		} else {
+			this.els['thumbnail-preview'].classList.remove('visible');
+		}
+
+		if (!this.dragTarget) return;
 
 		if (this.dragTarget === 'start') {
 			this.range.start = Math.max(0, Math.min(time, this.range.end - 0.5));
@@ -646,6 +708,48 @@ export class TrimmerOverlay {
 		}
 
 		this.updateUI();
+	}
+
+	private updateThumbnail(percent: number, time: number) {
+		const preview = this.els['thumbnail-preview'];
+		const image = this.els['thumbnail-image'];
+		const timeLabel = this.els['thumbnail-time'];
+
+		preview.style.left = `${percent}%`;
+		timeLabel.textContent = formatTime(time);
+
+		if (this.storyboardInfo) {
+			const info = this.storyboardInfo;
+			const url = getStoryboardTileUrl(info, time, this.duration);
+			
+			// A tile image contains multiple thumbnails in a grid.
+			// Calculate the correct offset for the current time.
+			const totalIntervals = info.count;
+			const intervalDuration = Math.max(info.interval, this.duration / totalIntervals);
+			const currentInterval = Math.max(0, Math.floor(time / intervalDuration));
+			
+			// Number of thumbnails per tile image
+			const cols = 5; // Typically YouTube uses 5x5 grids for level 3
+			const rows = 5;
+			const indexInTile = currentInterval % (cols * rows);
+			const col = indexInTile % cols;
+			const row = Math.floor(indexInTile / cols);
+
+			image.style.width = `${info.width}px`;
+			image.style.height = `${info.height}px`;
+			image.style.backgroundImage = `url("${url}")`;
+			image.style.backgroundPosition = `-${col * info.width}px -${row * info.height}px`;
+			
+			// Adjust dimensions if it's the last thumbnail which might not be full width
+			preview.style.width = `${info.width}px`;
+		} else {
+			// Fallback if no storyboard is available
+			image.style.width = '160px';
+			image.style.height = '90px';
+			image.style.background = '#222';
+		}
+
+		preview.classList.add('visible');
 	}
 
 	private onPointerUp() {

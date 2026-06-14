@@ -11,7 +11,7 @@ type FetchInit = {
 };
 
 type FetchPageResult =
-	| { ok: true; bytes: number[] }
+	| { ok: true; bytes: Uint8Array }
 	| { ok: true; contentLength: number }
 	| { ok: false; status: number };
 
@@ -34,7 +34,7 @@ async function runFetchInTab(tabId: number, url: string, init: FetchInit): Promi
 						};
 					}
 					const ab = await res.arrayBuffer();
-					return { ok: true as const, bytes: Array.from(new Uint8Array(ab)) };
+					return { ok: true as const, bytes: new Uint8Array(ab) };
 				})
 				.catch(() => ({ ok: false as const, status: 0 }));
 		},
@@ -45,7 +45,13 @@ async function runFetchInTab(tabId: number, url: string, init: FetchInit): Promi
 		throw new Error('Could not access the YouTube tab — refresh the page and retry.');
 	}
 
-	return injection.result as FetchPageResult;
+	const result = injection.result as FetchPageResult;
+	if (result.ok && 'bytes' in result && !(result.bytes instanceof Uint8Array)) {
+		// Handle cases where structured clone might have turned Uint8Array into a plain object/array
+		result.bytes = new Uint8Array(Object.values(result.bytes));
+	}
+
+	return result;
 }
 
 function httpError(status: number): Error {
