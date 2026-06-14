@@ -68,7 +68,33 @@ const STYLES = `
 .header-actions {
 	display: flex;
 	align-items: center;
-	gap: 8px;
+	gap: 12px;
+}
+
+.mode-switcher {
+	display: flex;
+	background: rgba(0, 0, 0, 0.3);
+	padding: 3px;
+	border-radius: 8px;
+	border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.mode-btn {
+	padding: 5px 12px;
+	border-radius: 6px;
+	font-size: 11px;
+	font-weight: 600;
+	cursor: pointer;
+	border: none;
+	background: transparent;
+	color: rgba(255, 255, 255, 0.5);
+	transition: all 0.2s;
+}
+
+.mode-btn.active {
+	background: rgba(255, 255, 255, 0.15);
+	color: #fff;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 .version-badge {
@@ -423,6 +449,7 @@ export class TrimmerOverlay {
 	private rafId = 0;
 	private onKeyDown: ((e: KeyboardEvent) => void) | null = null;
 	private storyboardInfo: StoryboardInfo | null = null;
+	private exportMode: 'bridge' | 'playback' = 'bridge';
 
 	private els: Record<string, HTMLElement> = {};
 
@@ -554,6 +581,10 @@ export class TrimmerOverlay {
 				<div class="header">
 					<div class="title"></div>
 					<div class="header-actions">
+						<div class="mode-switcher" data-el="mode-switcher">
+							<button class="mode-btn ${this.exportMode === 'bridge' ? 'active' : ''}" data-mode="bridge" title="Instant download via local yt-dlp bridge">Bridge</button>
+							<button class="mode-btn ${this.exportMode === 'playback' ? 'active' : ''}" data-mode="playback" title="Record fragment from browser playback">Playback</button>
+						</div>
 						<span class="version-badge" data-el="version"></span>
 						<button class="btn btn-ghost" data-action="cancel">Cancel</button>
 						<button class="btn btn-primary" data-action="export">Trim & Download</button>
@@ -565,20 +596,20 @@ export class TrimmerOverlay {
 						<div class="time-meta">Duration: <span data-el="clip-duration">0:00</span></div>
 					</div>
 					<div class="timeline-wrap" data-el="timeline">
-						<div class="thumbnail-preview" data-el="thumbnail-preview">
-							<div class="thumbnail-image" data-el="thumbnail-image"></div>
-							<div class="thumbnail-time" data-el="thumbnail-time">0:00</div>
-						</div>
 						<div class="timeline-track"></div>
+						<div class="selection" data-el="selection"></div>
 						<div class="dim-left" data-el="dim-left"></div>
 						<div class="dim-right" data-el="dim-right"></div>
-						<div class="selection" data-el="selection"></div>
 						<div class="handle handle-start" data-el="handle-start"></div>
 						<div class="handle handle-end" data-el="handle-end"></div>
 						<div class="playhead" data-el="playhead">
 							<div class="playhead-hit" data-el="playhead-hit"></div>
 							<div class="playhead-line"></div>
 							<div class="playhead-knob"></div>
+						</div>
+						<div class="thumbnail-preview" data-el="thumbnail-preview">
+							<div class="thumbnail-image" data-el="thumbnail-image"></div>
+							<div class="thumbnail-time" data-el="thumbnail-time">0:00</div>
 						</div>
 					</div>
 				</div>
@@ -620,11 +651,23 @@ export class TrimmerOverlay {
 
 		overlay.addEventListener('click', (e) => {
 			const target = (e.target as HTMLElement).closest('[data-action]') as HTMLElement | null;
-			if (!target) return;
-			const action = target.dataset.action;
-			if (action === 'cancel') this.hide();
-			if (action === 'export') this.export();
-			if (action === 'play-selection') this.togglePreview();
+			if (target) {
+				const action = target.dataset.action;
+				if (action === 'cancel') this.hide();
+				if (action === 'export') this.export();
+				if (action === 'play-selection') this.togglePreview();
+				return;
+			}
+
+			const modeBtn = (e.target as HTMLElement).closest('[data-mode]') as HTMLElement | null;
+			if (modeBtn) {
+				const mode = modeBtn.dataset.mode as 'bridge' | 'playback';
+				this.exportMode = mode;
+				this.shadow?.querySelectorAll('.mode-btn').forEach(btn => {
+					btn.classList.toggle('active', (btn as HTMLElement).dataset.mode === mode);
+				});
+				this.refreshStreamStatus();
+			}
 		});
 
 		overlay.addEventListener('mousedown', (e) => {
@@ -950,12 +993,16 @@ export class TrimmerOverlay {
 		const [streams, bridgeOk] = await Promise.all([resolveStreamUrls(), checkBridgeHealth()]);
 		this.streamsReady = hasUsableStreams(streams);
 
-		if (bridgeOk) {
-			this.setStatus('Bridge Ready — Instant high-quality export.', 'success');
-		} else if (this.streamsReady) {
-			this.setStatus('Ready — exports H.264 MP4 for web, iPhone, and Mac.');
+		if (this.exportMode === 'bridge') {
+			if (bridgeOk) {
+				this.setStatus('Bridge Ready — Instant high-quality export.', 'success');
+			} else if (this.streamsReady) {
+				this.setStatus('Ready — exports H.264 MP4 for web, iPhone, and Mac.');
+			} else {
+				this.setStatus('Play the video ~10s to capture the stream, OR start the yt-dlp bridge for instant export.');
+			}
 		} else {
-			this.setStatus('Play the video ~10s to capture the stream, OR start the yt-dlp bridge for instant export.');
+			this.setStatus('Playback Mode — Will record selection from your player.', 'progress');
 		}
 	}
 
@@ -979,20 +1026,25 @@ export class TrimmerOverlay {
 		this.stopPreview();
 
 		try {
-			const [streams, bridgeOk] = await Promise.all([resolveStreamUrls(), checkBridgeHealth()]);
-			this.streamsReady = hasUsableStreams(streams);
+			if (this.exportMode === 'bridge') {
+				const [streams, bridgeOk] = await Promise.all([resolveStreamUrls(), checkBridgeHealth()]);
+				this.streamsReady = hasUsableStreams(streams);
 
-			// Always try the bridge/stream path first if bridge is up OR we have streams
-			if (bridgeOk || this.streamsReady) {
-				try {
-					await this.exportViaStreams(streams);
-					return;
-				} catch (error) {
-					const message = error instanceof Error ? error.message : 'High-speed export failed';
-					this.setStatus(`${message} — falling back to recording…`, 'progress');
+				if (bridgeOk || this.streamsReady) {
+					try {
+						await this.exportViaStreams(streams);
+						return;
+					} catch (error) {
+						const message = error instanceof Error ? error.message : 'High-speed export failed';
+						this.setStatus(`${message} — you can try switching to Playback mode.`, 'error');
+						return;
+					}
+				} else {
+					throw new Error('Bridge/Stream not ready. Play the video or switch to Playback mode.');
 				}
 			}
 
+			// Playback mode or forced fallback
 			await this.exportViaRecording();
 		} catch (error) {
 			this.setProgress(false);
