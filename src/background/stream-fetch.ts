@@ -18,7 +18,7 @@ type FetchPageResult =
 async function runFetchInTab(tabId: number, url: string, init: FetchInit): Promise<FetchPageResult> {
 	const [injection] = await chrome.scripting.executeScript({
 		target: { tabId },
-		world: 'MAIN',
+		world: 'ISOLATED',
 		func: (fetchUrl: string, fetchInit: FetchInit) => {
 			return fetch(fetchUrl, {
 				method: fetchInit.method,

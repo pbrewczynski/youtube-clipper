@@ -83,44 +83,8 @@ export function initExportListener() {
 			const job = pendingJobs.get(message.jobId);
 			if (!job) return;
 
-			const bytes = message.data instanceof Uint8Array ? message.data : new Uint8Array(message.data ?? []);
-			if (!bytes.byteLength) {
-				sendResult(job.tabId, {
-					type: 'EXPORT_TRIM_RESULT',
-					success: false,
-					error: 'Export produced an empty file.',
-				});
-				pendingJobs.delete(message.jobId);
-				return;
-			}
-
-			sendProgress(job.tabId, {
-				type: 'EXPORT_TRIM_PROGRESS',
-				phase: 'saving',
-				percent: 100,
-				message: 'Saving file…',
-			});
-
-			chrome.runtime.sendMessage(
-				{
-					type: 'DOWNLOAD_FILE',
-					filename: job.filename,
-					mimeType: 'video/mp4',
-					buffer: bytes,
-				},
-				(response) => {
-					if (response?.success) {
-						sendResult(job.tabId, { type: 'EXPORT_TRIM_RESULT', success: true });
-					} else {
-						sendResult(job.tabId, {
-							type: 'EXPORT_TRIM_RESULT',
-							success: false,
-							error: response?.error ?? 'Download failed',
-						});
-					}
-					pendingJobs.delete(message.jobId);
-				}
-			);
+			sendResult(job.tabId, { type: 'EXPORT_TRIM_RESULT', success: true });
+			pendingJobs.delete(message.jobId);
 			return;
 		}
 
@@ -242,6 +206,7 @@ export async function handleExportTrim(request: ExportTrimRequest): Promise<Expo
 		await chrome.runtime.sendMessage({
 			type: 'TRIM_JOB',
 			jobId,
+			filename: job.filename,
 			videoData: fetched.videoData,
 			audioData: fetched.audioData,
 			trimStartOffset: fetched.trimStartOffset ?? start,
@@ -284,6 +249,7 @@ export async function handleExportTranscode(request: ExportTranscodeRequest): Pr
 		await chrome.runtime.sendMessage({
 			type: 'TRANSCODE_BLOB_JOB',
 			jobId,
+			filename,
 			mimeType: request.mimeType,
 			buffer: new Uint8Array(request.buffer),
 		});

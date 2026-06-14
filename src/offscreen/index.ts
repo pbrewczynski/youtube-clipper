@@ -72,21 +72,30 @@ function post(message: TrimProgress | TrimComplete | TrimError) {
 async function runFfmpeg(ff: FFmpeg, args: string[]) {
 	await ff.exec(args);
 	const output = await ff.readFile('output.mp4');
-	return new Blob([output], { type: 'video/mp4; codecs="avc1.640028, mp4a.40.2"' });
+	return new Blob([output], { type: 'video/mp4' });
 }
 
-async function cleanupFiles(ff: FFmpeg, files: string[]) {
-	for (const file of files) {
-		try {
-			await ff.deleteFile(file);
-		} catch {
-			// ignore missing temp files
-		}
-	}
+async function triggerDownload(blob: Blob, filename: string) {
+	const url = URL.createObjectURL(blob);
+	return new Promise<void>((resolve, reject) => {
+		chrome.downloads.download(
+			{
+				url,
+				filename,
+				saveAs: true,
+			},
+			() => {
+				const err = chrome.runtime.lastError;
+				URL.revokeObjectURL(url);
+				if (err) reject(new Error(err.message));
+				else resolve();
+			}
+		);
+	});
 }
 
-async function processTrimJob(job: TrimJob) {
-	const { jobId, videoData, audioData, trimStartOffset, duration, mode } = job;
+async function processTrimJob(job: TrimJob & { filename: string }) {
+	const { jobId, videoData, audioData, trimStartOffset, duration, mode, filename } = job;
 	const tempFiles = ['output.mp4'];
 
 	try {
@@ -116,19 +125,19 @@ async function processTrimJob(job: TrimJob) {
 		tempFiles.push(...inputFiles);
 
 		const blob = await runFfmpeg(ff, args);
-		const data = new Uint8Array(await blob.arrayBuffer());
+		await triggerDownload(blob, filename);
 
 		await cleanupFiles(ff, tempFiles);
 
-		post({ type: 'TRIM_COMPLETE', jobId, data });
+		post({ type: 'TRIM_COMPLETE', jobId, data: new Uint8Array() }); // Send empty data since we downloaded it
 	} catch (error) {
 		const message = error instanceof Error ? error.message : 'Trim failed';
 		post({ type: 'TRIM_ERROR', jobId, error: message });
 	}
 }
 
-async function processTranscodeBlobJob(job: TranscodeBlobJob) {
-	const { jobId, mimeType, buffer } = job;
+async function processTranscodeBlobJob(job: TranscodeBlobJob & { filename: string }) {
+	const { jobId, mimeType, buffer, filename } = job;
 	const tempFiles = ['output.mp4'];
 
 	try {
@@ -146,11 +155,11 @@ async function processTranscodeBlobJob(job: TranscodeBlobJob) {
 		tempFiles.push(inputFile);
 
 		const blob = await runFfmpeg(ff, args);
-		const data = new Uint8Array(await blob.arrayBuffer());
+		await triggerDownload(blob, filename);
 
 		await cleanupFiles(ff, tempFiles);
 
-		post({ type: 'TRIM_COMPLETE', jobId, data });
+		post({ type: 'TRIM_COMPLETE', jobId, data: new Uint8Array() });
 	} catch (error) {
 		const message = error instanceof Error ? error.message : 'Transcode failed';
 		post({ type: 'TRIM_ERROR', jobId, error: message });
@@ -159,30 +168,21 @@ async function processTranscodeBlobJob(job: TranscodeBlobJob) {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 	if (message?.type === 'TRIM_JOB') {
-		processTrimJob(message as TrimJob);
+		processTrimJob(message as TrimJob & { filename: string });
 		sendResponse({ ok: true });
 	}
 
 	if (message?.type === 'TRANSCODE_BLOB_JOB') {
-		processTranscodeBlobJob(message as TranscodeBlobJob);
+		processTranscodeBlobJob(message as TranscodeBlobJob & { filename: string });
 		sendResponse({ ok: true });
 	}
 
 	if (message?.type === 'DOWNLOAD_FILE') {
 		const bytes = message.buffer instanceof Uint8Array ? message.buffer : new Uint8Array(message.buffer);
 		const blob = new Blob([bytes], { type: message.mimeType ?? 'video/mp4' });
-		const blobUrl = URL.createObjectURL(blob);
-		chrome.downloads.download(
-			{
-				url: blobUrl,
-				filename: message.filename,
-				saveAs: true,
-			},
-			() => {
-				URL.revokeObjectURL(blobUrl);
-				sendResponse({ success: true });
-			}
-		);
+		triggerDownload(blob, message.filename)
+			.then(() => sendResponse({ success: true }))
+			.catch((err) => sendResponse({ success: false, error: err.message }));
 		return true;
 	}
 
