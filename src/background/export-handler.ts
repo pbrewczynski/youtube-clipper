@@ -31,6 +31,15 @@ function sendResult(tabId: number, result: ExportTrimResult) {
 	chrome.tabs.sendMessage(tabId, result).catch(() => {});
 }
 
+function isValidStreamUrl(url: string): boolean {
+	try {
+		const parsed = new URL(url);
+		return ['http:', 'https:'].includes(parsed.protocol) && parsed.hostname.length > 0;
+	} catch {
+		return false;
+	}
+}
+
 function sanitizeFilename(title: string): string {
 	return title.replace(/[<>:"/\\|?*]/g, '').trim().slice(0, 80) || 'youtube-clip';
 }
@@ -71,21 +80,43 @@ export function initExportListener() {
 
 		if (message?.type === 'TRIM_COMPLETE') {
 			const job = pendingJobs.get(message.jobId);
-			if (job) {
-				chrome.downloads
-					.download({ url: message.blobUrl, filename: job.filename, saveAs: true })
-					.finally(() => {
-						setTimeout(() => URL.revokeObjectURL(message.blobUrl), 60_000);
-					});
-				sendProgress(job.tabId, {
-					type: 'EXPORT_TRIM_PROGRESS',
-					phase: 'saving',
-					percent: 100,
-					message: 'Saving file…',
+			if (!job) return;
+
+			const bytes = message.data instanceof Uint8Array ? message.data : new Uint8Array(message.data ?? []);
+			if (!bytes.byteLength) {
+				sendResult(job.tabId, {
+					type: 'EXPORT_TRIM_RESULT',
+					success: false,
+					error: 'Export produced an empty file.',
 				});
-				sendResult(job.tabId, { type: 'EXPORT_TRIM_RESULT', success: true });
 				pendingJobs.delete(message.jobId);
+				return;
 			}
+
+			const blob = new Blob([bytes], { type: 'video/mp4' });
+			const blobUrl = URL.createObjectURL(blob);
+
+			sendProgress(job.tabId, {
+				type: 'EXPORT_TRIM_PROGRESS',
+				phase: 'saving',
+				percent: 100,
+				message: 'Saving file…',
+			});
+
+			chrome.downloads.download({ url: blobUrl, filename: job.filename, saveAs: true }, (downloadId) => {
+				const error = chrome.runtime.lastError;
+				if (error || downloadId === undefined) {
+					sendResult(job.tabId, {
+						type: 'EXPORT_TRIM_RESULT',
+						success: false,
+						error: error?.message ?? 'Download failed',
+					});
+				} else {
+					sendResult(job.tabId, { type: 'EXPORT_TRIM_RESULT', success: true });
+				}
+				pendingJobs.delete(message.jobId);
+				setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+			});
 			return;
 		}
 
@@ -119,12 +150,16 @@ export async function handleExportTrim(request: ExportTrimRequest): Promise<Expo
 	}
 
 	const streamUrl = streams.progressiveUrl ?? streams.videoUrl;
-	if (!streamUrl) {
+	if (!streamUrl || !isValidStreamUrl(streamUrl)) {
 		return {
 			type: 'EXPORT_TRIM_RESULT',
 			success: false,
-			error: 'No video stream available — refresh the page and try again.',
+			error: 'No video stream available — refresh the page, play the video briefly, then retry.',
 		};
+	}
+
+	if (streams.audioUrl && !isValidStreamUrl(streams.audioUrl)) {
+		streams.audioUrl = undefined;
 	}
 
 	try {

@@ -34,7 +34,7 @@ type TrimProgress = {
 type TrimComplete = {
 	type: 'TRIM_COMPLETE';
 	jobId: string;
-	blobUrl: string;
+	data: Uint8Array;
 };
 
 type TrimError = {
@@ -69,7 +69,19 @@ function post(message: TrimProgress | TrimComplete | TrimError) {
 	chrome.runtime.sendMessage(message);
 }
 
+function assertFetchableUrl(url: string) {
+	try {
+		const parsed = new URL(url);
+		if (!['http:', 'https:'].includes(parsed.protocol)) {
+			throw new Error('Invalid URL');
+		}
+	} catch {
+		throw new Error('Invalid stream URL — refresh the page, play the video briefly, then retry.');
+	}
+}
+
 async function fetchStream(url: string, onProgress: (percent: number) => void): Promise<Uint8Array> {
+	assertFetchableUrl(url);
 	const response = await fetch(url, {
 		headers: { Referer: 'https://www.youtube.com/', Origin: 'https://www.youtube.com' },
 	});
@@ -173,11 +185,11 @@ async function processTrimJob(job: TrimJob) {
 		tempFiles.push(...inputFiles);
 
 		const blob = await runFfmpeg(ff, args);
-		const blobUrl = URL.createObjectURL(blob);
+		const data = new Uint8Array(await blob.arrayBuffer());
 
 		await cleanupFiles(ff, tempFiles);
 
-		post({ type: 'TRIM_COMPLETE', jobId, blobUrl });
+		post({ type: 'TRIM_COMPLETE', jobId, data });
 	} catch (error) {
 		const message = error instanceof Error ? error.message : 'Trim failed';
 		post({ type: 'TRIM_ERROR', jobId, error: message });
@@ -203,11 +215,11 @@ async function processTranscodeBlobJob(job: TranscodeBlobJob) {
 		tempFiles.push(inputFile);
 
 		const blob = await runFfmpeg(ff, args);
-		const blobUrl = URL.createObjectURL(blob);
+		const data = new Uint8Array(await blob.arrayBuffer());
 
 		await cleanupFiles(ff, tempFiles);
 
-		post({ type: 'TRIM_COMPLETE', jobId, blobUrl });
+		post({ type: 'TRIM_COMPLETE', jobId, data });
 	} catch (error) {
 		const message = error instanceof Error ? error.message : 'Transcode failed';
 		post({ type: 'TRIM_ERROR', jobId, error: message });
