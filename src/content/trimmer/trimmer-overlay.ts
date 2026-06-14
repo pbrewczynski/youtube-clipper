@@ -23,37 +23,71 @@ type TranscriptSegment = {
 };
 
 const STYLES = `
-:host { all: initial; }
+:host {
+	all: initial;
+	position: fixed;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 2147483646;
+	pointer-events: none;
+	font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+}
 *, *::before, *::after { box-sizing: border-box; }
 
-.overlay {
-	position: fixed;
-	inset: 0;
-	z-index: 2147483646;
-	display: flex;
-	align-items: flex-end;
-	justify-content: center;
-	background: rgba(0, 0, 0, 0.55);
-	backdrop-filter: blur(4px);
-	font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
-	animation: fadeIn 0.2s ease;
-}
-
-@keyframes fadeIn {
-	from { opacity: 0; }
-	to { opacity: 1; }
+.dock {
+	pointer-events: auto;
+	width: 100%;
 }
 
 .panel {
 	width: 100%;
 	margin: 0;
-	background: linear-gradient(180deg, rgba(38, 38, 40, 0.98) 0%, rgba(28, 28, 30, 0.98) 100%);
-	border-top: 1px solid rgba(255, 255, 255, 0.12);
-	border-radius: 14px 14px 0 0;
-	box-shadow: 0 -12px 60px rgba(0, 0, 0, 0.55);
+	max-height: min(44vh, 420px);
+	overflow-y: auto;
+	background: linear-gradient(180deg, rgba(34, 34, 36, 0.97) 0%, rgba(22, 22, 24, 0.98) 100%);
+	border-top: 1px solid rgba(255, 255, 255, 0.14);
+	border-radius: 16px 16px 0 0;
+	box-shadow:
+		0 -8px 32px rgba(0, 0, 0, 0.42),
+		inset 0 1px 0 rgba(255, 255, 255, 0.06);
 	color: #f5f5f7;
-	overflow: hidden;
-	transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+	animation: slideUp 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+	scrollbar-width: thin;
+	scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+.panel::-webkit-scrollbar {
+	width: 6px;
+}
+.panel::-webkit-scrollbar-thumb {
+	background: rgba(255, 255, 255, 0.15);
+	border-radius: 3px;
+}
+
+@keyframes slideUp {
+	from {
+		transform: translateY(100%);
+		opacity: 0.92;
+	}
+	to {
+		transform: translateY(0);
+		opacity: 1;
+	}
+}
+
+.panel-handle {
+	display: flex;
+	justify-content: center;
+	padding: 10px 0 2px;
+	cursor: default;
+}
+
+.panel-handle span {
+	width: 40px;
+	height: 4px;
+	border-radius: 999px;
+	background: rgba(255, 255, 255, 0.24);
 }
 
 .header {
@@ -137,6 +171,14 @@ const STYLES = `
 .btn-primary:disabled {
 	opacity: 0.45;
 	cursor: not-allowed;
+}
+.btn-icon {
+	width: 32px;
+	height: 32px;
+	padding: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 }
 
 .preview-area {
@@ -698,6 +740,12 @@ export class TrimmerOverlay {
 	private transcriptAvailable = false;
 	private transcriptFailureReason: string | null = null;
 
+	private onVideoMetadata = () => {
+		this.syncFromVideo();
+		this.populateTimeline();
+		this.updateUI();
+	};
+
 	private onVideoPlay = () => {
 		this.previewing = true;
 		this.updatePlayBtn();
@@ -711,32 +759,69 @@ export class TrimmerOverlay {
 	private els: Record<string, HTMLElement> = {};
 
 	show() {
-		if (this.visible) return;
 		stopClipPlayback();
 		this.init();
+
+		const isRefresh = this.visible;
 		this.visible = true;
-		this.host!.style.display = 'flex';
-		this.syncFromVideo();
-		this.populateTimeline();
+		this.host!.style.display = 'block';
+		this.prepareForVideo();
 		this.seekTo(this.range.start);
 		this.updateUI();
-		this.startPlayheadLoop();
+
+		if (!isRefresh) {
+			this.startPlayheadLoop();
+			this.initTranscriptSync();
+		}
+
+		this.attachVideoListeners();
+		this.replayPanelAnimation();
 		void this.refreshStreamStatus();
-		this.initTranscriptSync();
 		void this.loadTranscript();
+	}
 
-		this.video?.addEventListener('play', this.onVideoPlay);
-		this.video?.addEventListener('pause', this.onVideoPause);
+	private replayPanelAnimation() {
+		const panel = this.els.panel;
+		if (!panel) return;
+		panel.style.animation = 'none';
+		void panel.offsetWidth;
+		panel.style.animation = '';
+	}
 
-		this.video?.addEventListener(
-			'loadedmetadata',
-			() => {
-				this.syncFromVideo();
-				this.populateTimeline();
-				this.updateUI();
-			},
-			{ once: true }
-		);
+	private prepareForVideo() {
+		this.video = document.querySelector('video');
+		this.duration = getVideoDuration() || this.video?.duration || 0;
+		this.currentTime = this.video?.currentTime ?? 0;
+		this.storyboardInfo = parseStoryboard();
+		this.range = {
+			start: 0,
+			end: Math.min(30, this.duration || 30),
+		};
+		this.pickedTranscriptIndex = -1;
+		this.activeTranscriptIndex = -1;
+		this.showTranscript = false;
+		this.exporting = false;
+		this.previewing = false;
+		this.setProgress(false);
+		this.setStatus('', '');
+		this.syncFromVideo();
+		this.populateTimeline();
+		this.updatePlayBtn();
+	}
+
+	private detachVideoListeners() {
+		this.video?.removeEventListener('play', this.onVideoPlay);
+		this.video?.removeEventListener('pause', this.onVideoPause);
+		this.video?.removeEventListener('loadedmetadata', this.onVideoMetadata);
+	}
+
+	private attachVideoListeners() {
+		this.detachVideoListeners();
+		this.video = document.querySelector('video');
+		if (!this.video) return;
+		this.video.addEventListener('play', this.onVideoPlay);
+		this.video.addEventListener('pause', this.onVideoPause);
+		this.video.addEventListener('loadedmetadata', this.onVideoMetadata);
 	}
 
 	private initTranscriptSync() {
@@ -954,8 +1039,7 @@ export class TrimmerOverlay {
 		this.stopPreview();
 		this.clearExportListener();
 		cancelAnimationFrame(this.rafId);
-		this.video?.removeEventListener('play', this.onVideoPlay);
-		this.video?.removeEventListener('pause', this.onVideoPause);
+		this.detachVideoListeners();
 	}
 
 	isVisible() {
@@ -1006,9 +1090,10 @@ export class TrimmerOverlay {
 		this.shadow.appendChild(style);
 
 		const overlay = document.createElement('div');
-		overlay.className = 'overlay';
+		overlay.className = 'dock';
 		overlay.innerHTML = `
-			<div class="panel">
+			<div class="panel" data-el="panel">
+				<div class="panel-handle" aria-hidden="true"><span></span></div>
 				<div class="header">
 					<div class="title"></div>
 					<div class="header-actions">
@@ -1017,7 +1102,11 @@ export class TrimmerOverlay {
 							<button class="mode-btn ${this.exportMode === 'playback' ? 'active' : ''}" data-mode="playback" title="Record fragment from browser playback">Playback</button>
 						</div>
 						<span class="version-badge" data-el="version"></span>
-						<button class="btn btn-ghost" data-action="cancel">Cancel</button>
+						<button class="btn btn-ghost btn-icon" data-action="minimize" title="Minimize trimmer">
+							<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+								<path d="M7.41 15.41 12 10.83l4.59 4.58L18 14l-6-6-6 6z"/>
+							</svg>
+						</button>
 						<button class="btn btn-primary" data-action="export">Trim & Download</button>
 					</div>
 				</div>
@@ -1108,7 +1197,7 @@ export class TrimmerOverlay {
 			const target = (e.target as HTMLElement).closest('[data-action]') as HTMLElement | null;
 			if (target) {
 				const action = target.dataset.action;
-				if (action === 'cancel') this.hide();
+				if (action === 'minimize') this.hide();
 				if (action === 'export') this.export();
 				if (action === 'play-selection') this.togglePreview();
 				if (action === 'toggle-transcript' && this.transcriptAvailable) {
@@ -1179,10 +1268,6 @@ export class TrimmerOverlay {
 			}
 		};
 		document.addEventListener('keydown', this.onKeyDown);
-
-		overlay.addEventListener('click', (e) => {
-			if (e.target === overlay) this.hide();
-		});
 
 		document.body.appendChild(this.host);
 		this.host.style.display = 'none';
