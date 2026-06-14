@@ -613,8 +613,20 @@ export class TrimmerOverlay {
 			const url = track.baseUrl + '&fmt=json3';
 			const res = await fetch(url);
 			if (!res.ok) return null;
+			const text = await res.text();
+			if (!text || !text.trim()) {
+				console.log('[fetchTranscript] Empty response received from timedtext API.');
+				return null;
+			}
 
-			const data = await res.json();
+			let data;
+			try {
+				data = JSON.parse(text);
+			} catch (parseErr) {
+				console.warn('[fetchTranscript] Failed to parse timedtext JSON response:', parseErr);
+				return null;
+			}
+			
 			if (!data?.events) return null;
 
 			const segments: TranscriptSegment[] = [];
