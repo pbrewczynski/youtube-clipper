@@ -44,14 +44,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 	}
 
 	if (message?.type === 'DOWNLOAD_BLOB') {
-		const bytes = new Uint8Array(message.buffer);
-		const blob = new Blob([bytes], { type: message.mimeType ?? 'video/webm' });
-		const blobUrl = URL.createObjectURL(blob);
-		chrome.downloads
-			.download({ url: blobUrl, filename: message.filename, saveAs: true })
-			.then(() => sendResponse({ success: true }))
-			.catch((error: Error) => sendResponse({ success: false, error: error.message }))
-			.finally(() => setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000));
+		chrome.runtime.sendMessage(
+			{
+				type: 'DOWNLOAD_FILE',
+				filename: message.filename,
+				mimeType: message.mimeType ?? 'video/webm',
+				buffer: new Uint8Array(message.buffer),
+			},
+			(response) => {
+				sendResponse(response ?? { success: false, error: 'Could not trigger download' });
+			}
+		);
 		return true;
 	}
 });

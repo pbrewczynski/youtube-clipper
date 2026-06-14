@@ -94,9 +94,6 @@ export function initExportListener() {
 				return;
 			}
 
-			const blob = new Blob([bytes], { type: 'video/mp4' });
-			const blobUrl = URL.createObjectURL(blob);
-
 			sendProgress(job.tabId, {
 				type: 'EXPORT_TRIM_PROGRESS',
 				phase: 'saving',
@@ -104,20 +101,26 @@ export function initExportListener() {
 				message: 'Saving file…',
 			});
 
-			chrome.downloads.download({ url: blobUrl, filename: job.filename, saveAs: true }, (downloadId) => {
-				const error = chrome.runtime.lastError;
-				if (error || downloadId === undefined) {
-					sendResult(job.tabId, {
-						type: 'EXPORT_TRIM_RESULT',
-						success: false,
-						error: error?.message ?? 'Download failed',
-					});
-				} else {
-					sendResult(job.tabId, { type: 'EXPORT_TRIM_RESULT', success: true });
+			chrome.runtime.sendMessage(
+				{
+					type: 'DOWNLOAD_FILE',
+					filename: job.filename,
+					mimeType: 'video/mp4',
+					buffer: bytes,
+				},
+				(response) => {
+					if (response?.success) {
+						sendResult(job.tabId, { type: 'EXPORT_TRIM_RESULT', success: true });
+					} else {
+						sendResult(job.tabId, {
+							type: 'EXPORT_TRIM_RESULT',
+							success: false,
+							error: response?.error ?? 'Download failed',
+						});
+					}
+					pendingJobs.delete(message.jobId);
 				}
-				pendingJobs.delete(message.jobId);
-				setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
-			});
+			);
 			return;
 		}
 

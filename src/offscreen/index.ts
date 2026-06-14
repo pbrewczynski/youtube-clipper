@@ -168,5 +168,23 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 		sendResponse({ ok: true });
 	}
 
+	if (message?.type === 'DOWNLOAD_FILE') {
+		const bytes = message.buffer instanceof Uint8Array ? message.buffer : new Uint8Array(message.buffer);
+		const blob = new Blob([bytes], { type: message.mimeType ?? 'video/mp4' });
+		const blobUrl = URL.createObjectURL(blob);
+		chrome.downloads.download(
+			{
+				url: blobUrl,
+				filename: message.filename,
+				saveAs: true,
+			},
+			() => {
+				URL.revokeObjectURL(blobUrl);
+				sendResponse({ success: true });
+			}
+		);
+		return true;
+	}
+
 	return true;
 });

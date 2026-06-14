@@ -56,12 +56,13 @@ export default defineManifest(async (env) => ({
 			description: 'Play/Pause the first Youtube video tab',
 		},
 	},
-	permissions: ['activeTab', 'tabs', 'scripting', 'storage', 'downloads', 'offscreen', 'webRequest'],
+	permissions: ['activeTab', 'tabs', 'scripting', 'storage', 'downloads', 'offscreen'],
 	host_permissions: [
 		'http://*/',
 		'https://*/',
 		'*://*.googlevideo.com/*',
 		'*://www.youtube.com/*',
+		'http://localhost:*',
 	],
 	web_accessible_resources: [
 		{
@@ -75,6 +76,6 @@ export default defineManifest(async (env) => ({
 		},
 	],
 	content_security_policy: {
-		extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
+		extension_pages: "script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline'; object-src 'self'",
 	},
 }));
