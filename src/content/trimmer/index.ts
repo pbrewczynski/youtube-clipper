@@ -1,7 +1,6 @@
 import { trimmerOverlay } from './trimmer-overlay';
-import type { ContentMessage, FetchTrimStreamsRequest } from '../../messaging';
+import type { ContentMessage } from '../../messaging';
 import { stopClipPlayback } from '../clip-playback';
-import { fetchTrimStreams } from './stream-fetch';
 
 export function initTrimmer() {
 	chrome.runtime.onMessage.addListener((message: ContentMessage, _sender, sendResponse) => {
@@ -32,27 +31,6 @@ export function initTrimmer() {
 			return;
 		}
 
-		if (message.type === 'FETCH_TRIM_STREAMS') {
-			const req = message as FetchTrimStreamsRequest;
-			fetchTrimStreams({
-				streams: req.streams,
-				start: req.start,
-				end: req.end,
-				duration: req.duration,
-			})
-				.then((result) => {
-					sendResponse({
-						ok: true,
-						videoData: result.videoData,
-						audioData: result.audioData,
-						trimStartOffset: result.trimStartOffset,
-					});
-				})
-				.catch((error: Error) => {
-					sendResponse({ ok: false, error: error.message });
-				});
-			return true;
-		}
 	});
 
 	injectClipButton();

@@ -19,22 +19,6 @@ export type ExportTrimRequest = {
 	streams: StreamUrls;
 };
 
-export type FetchTrimStreamsRequest = {
-	type: 'FETCH_TRIM_STREAMS';
-	start: number;
-	end: number;
-	duration: number;
-	streams: StreamUrls;
-};
-
-export type FetchTrimStreamsResponse = {
-	ok: boolean;
-	error?: string;
-	videoData?: Uint8Array;
-	audioData?: Uint8Array;
-	trimStartOffset?: number;
-};
-
 export type ExportTrimProgress = {
 	type: 'EXPORT_TRIM_PROGRESS';
 	phase: 'downloading' | 'trimming' | 'saving';
@@ -88,7 +72,6 @@ export type ContentMessage =
 	| HideTrimmerMessage
 	| GetTrimmerStateMessage
 	| SetTrimmerRangeMessage
-	| FetchTrimStreamsRequest
 	| ExportTrimRequest;
 
 export type BackgroundMessage = ExportTrimProgress | ExportTrimResult | TrimmerStateResponse;

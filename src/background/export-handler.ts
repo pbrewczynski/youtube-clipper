@@ -3,9 +3,9 @@ import type {
 	ExportTrimRequest,
 	ExportTrimProgress,
 	ExportTrimResult,
-	FetchTrimStreamsResponse,
 	StreamUrls,
 } from '../messaging';
+import { fetchTrimStreams } from './stream-fetch';
 
 type PendingJob = {
 	tabId: number;
@@ -171,21 +171,27 @@ export async function handleExportTrim(request: ExportTrimRequest): Promise<Expo
 			message: 'Downloading stream from YouTube…',
 		});
 
-		const fetched = (await chrome.tabs.sendMessage(tabId, {
-			type: 'FETCH_TRIM_STREAMS',
-			start,
-			end,
-			duration: request.duration,
-			streams,
-		})) as FetchTrimStreamsResponse | undefined;
-
-		if (!fetched?.ok || !fetched.videoData?.byteLength) {
+		let fetched;
+		try {
+			fetched = await fetchTrimStreams(tabId, {
+				streams,
+				start,
+				end,
+				duration: request.duration,
+			});
+		} catch (error) {
 			return {
 				type: 'EXPORT_TRIM_RESULT',
 				success: false,
-				error:
-					fetched?.error ??
-					'Could not download stream — play the video for ~10 seconds, then retry Trim & Download.',
+				error: error instanceof Error ? error.message : 'Could not download stream.',
+			};
+		}
+
+		if (!fetched.videoData.byteLength) {
+			return {
+				type: 'EXPORT_TRIM_RESULT',
+				success: false,
+				error: 'Could not download stream — play the video for ~10 seconds, then retry Trim & Download.',
 			};
 		}
 
