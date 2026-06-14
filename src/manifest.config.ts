@@ -56,13 +56,13 @@ export default defineManifest(async (env) => ({
 			description: 'Play/Pause the first Youtube video tab',
 		},
 	},
-	permissions: ['activeTab', 'tabs', 'scripting', 'storage', 'downloads', 'offscreen'],
+	permissions: ['activeTab', 'tabs', 'scripting', 'storage', 'downloads', 'offscreen', 'webRequest', 'webRequestBlocking'],
 	host_permissions: [
 		'http://*/',
 		'https://*/',
 		'*://*.googlevideo.com/*',
 		'*://www.youtube.com/*',
-		'http://localhost:*',
+		'http://localhost/*',
 	],
 	web_accessible_resources: [
 		{
