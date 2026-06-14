@@ -1,5 +1,5 @@
 import { getContentStorage } from './local-storage';
-import { initTrimmer } from './trimmer';
+import { initTrimmer, isTrimmerVisible } from './trimmer';
 import { startClipPlayback, stopClipPlayback } from './clip-playback';
 
 initTrimmer();
@@ -34,7 +34,9 @@ function onPageChange() {
 
 	prevId = videoId;
 	stopClipPlayback();
-	startClipPlayback(storage, videoId);
+	if (!isTrimmerVisible()) {
+		startClipPlayback(storage, videoId);
+	}
 }
 
 void main();

@@ -747,13 +747,14 @@ export class TrimmerOverlay {
 	};
 
 	private onVideoPlay = () => {
-		this.previewing = true;
 		this.updatePlayBtn();
 	};
 
 	private onVideoPause = () => {
-		this.previewing = false;
-		this.updatePlayBtn();
+		if (this.previewing) {
+			this.previewing = false;
+			this.updatePlayBtn();
+		}
 	};
 
 	private els: Record<string, HTMLElement> = {};
@@ -1247,6 +1248,7 @@ export class TrimmerOverlay {
 		this.onKeyDown = (e: KeyboardEvent) => {
 			if (!this.visible) return;
 			if (e.target instanceof HTMLInputElement) return;
+			if (!this.isEventInsideTrimmer(e)) return;
 
 			if (e.key === 'Escape') {
 				this.hide();
@@ -1271,6 +1273,10 @@ export class TrimmerOverlay {
 
 		document.body.appendChild(this.host);
 		this.host.style.display = 'none';
+	}
+
+	private isEventInsideTrimmer(event: Event): boolean {
+		return !!this.host && event.composedPath().includes(this.host);
 	}
 
 	private syncFromVideo() {
@@ -1498,9 +1504,15 @@ export class TrimmerOverlay {
 			if (!this.visible) return;
 			if (this.video) {
 				this.currentTime = this.video.currentTime;
-				if (!this.exporting && this.currentTime >= this.range.end && !this.video.paused) {
+				if (
+					this.previewing &&
+					!this.exporting &&
+					this.currentTime >= this.range.end &&
+					!this.video.paused
+				) {
 					this.video.pause();
 					this.previewing = false;
+					this.updatePlayBtn();
 				}
 				this.updateUI();
 

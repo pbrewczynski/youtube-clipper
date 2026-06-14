@@ -3,6 +3,10 @@ import type { ContentMessage } from '../../messaging';
 import { stopClipPlayback } from '../clip-playback';
 import { getVideoIdFromUrl } from './trimmer-utils';
 
+export function isTrimmerVisible(): boolean {
+	return trimmerOverlay.isVisible();
+}
+
 export function initTrimmer() {
 	chrome.runtime.onMessage.addListener((message: ContentMessage, _sender, sendResponse) => {
 		if (message.type === 'SHOW_TRIMMER') {
