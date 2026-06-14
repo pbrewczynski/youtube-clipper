@@ -36,14 +36,15 @@ const STYLES = `
 }
 
 .panel {
-	width: min(920px, calc(100vw - 32px));
-	margin-bottom: 24px;
+	width: 100%;
+	margin: 0;
 	background: linear-gradient(180deg, rgba(38, 38, 40, 0.98) 0%, rgba(28, 28, 30, 0.98) 100%);
-	border: 1px solid rgba(255, 255, 255, 0.12);
-	border-radius: 14px;
-	box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+	border-top: 1px solid rgba(255, 255, 255, 0.12);
+	border-radius: 14px 14px 0 0;
+	box-shadow: 0 -12px 60px rgba(0, 0, 0, 0.55);
 	color: #f5f5f7;
 	overflow: hidden;
+	transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .header {
@@ -462,10 +463,10 @@ export class TrimmerOverlay {
 		track.style.background = 'none';
 		const info = this.storyboardInfo;
 		const trackRect = this.els.timeline.getBoundingClientRect();
-		const trackWidth = trackRect.width || 900;
+		const trackWidth = trackRect.width || window.innerWidth;
 		const thumbHeight = 56;
 		const thumbWidth = thumbHeight * (info.width / info.height);
-		const count = Math.ceil(trackWidth / thumbWidth);
+		const count = Math.ceil(trackWidth / thumbWidth) + 1; // Add one extra for overlap safety
 
 		for (let i = 0; i < count; i++) {
 			const time = (i / count) * this.duration;
@@ -643,6 +644,13 @@ export class TrimmerOverlay {
 		window.addEventListener('mouseup', onUp);
 		window.addEventListener('touchmove', (e) => onMove(e.touches[0].clientX, e.target as HTMLElement), { passive: true });
 		window.addEventListener('touchend', onUp);
+
+		window.addEventListener('resize', () => {
+			if (this.visible) {
+				this.populateTimeline();
+				this.updateUI();
+			}
+		});
 
 		this.onKeyDown = (e: KeyboardEvent) => {
 			if (!this.visible) return;
