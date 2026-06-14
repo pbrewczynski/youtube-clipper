@@ -3,6 +3,11 @@ import type { StreamUrls } from '../messaging';
 const streamsByTab = new Map<number, StreamUrls>();
 
 export function initStreamCapture() {
+	if (!chrome.webRequest || !chrome.webRequest.onBeforeRequest) {
+		console.warn('chrome.webRequest.onBeforeRequest is not available. Stream capture via network events will be disabled.');
+		return;
+	}
+
 	chrome.webRequest.onBeforeRequest.addListener(
 		(details) => {
 			if (details.tabId < 0) return;

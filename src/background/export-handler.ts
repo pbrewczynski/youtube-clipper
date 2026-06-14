@@ -206,7 +206,7 @@ export async function handleExportTrim(request: ExportTrimRequest): Promise<Expo
 		await chrome.runtime.sendMessage({
 			type: 'TRIM_JOB',
 			jobId,
-			filename: job.filename,
+			filename,
 			videoData: fetched.videoData,
 			audioData: fetched.audioData,
 			trimStartOffset: fetched.trimStartOffset ?? start,
