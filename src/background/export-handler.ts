@@ -83,7 +83,14 @@ export function initExportListener() {
 			const job = pendingJobs.get(message.jobId);
 			if (!job) return;
 
-			sendResult(job.tabId, { type: 'EXPORT_TRIM_RESULT', success: true, downloadId: message.downloadId });
+			// Wait briefly for the download to be registered in the downloads manager, then find its ID
+			setTimeout(() => {
+				chrome.downloads.search({ limit: 1, orderBy: ['-startTime'] }, (items) => {
+					const downloadId = (items && items[0]) ? items[0].id : undefined;
+					sendResult(job.tabId, { type: 'EXPORT_TRIM_RESULT', success: true, downloadId });
+				});
+			}, 300);
+
 			pendingJobs.delete(message.jobId);
 			return;
 		}

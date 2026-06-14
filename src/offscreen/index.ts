@@ -81,59 +81,30 @@ async function triggerDownload(blob: Blob, filename: string): Promise<number> {
 	const url = URL.createObjectURL(blob);
 	console.log(`[triggerDownload] Blob URL created: ${url}`);
 	
-	return new Promise<number>((resolve, reject) => {
-		let resolved = false;
+	try {
+		console.log(`[triggerDownload] Creating temporary <a> element to trigger download`);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = filename;
+		document.body.appendChild(a);
 		
-		const onCreatedListener = (downloadItem: chrome.downloads.DownloadItem) => {
-			// Check if the download URL matches or has the same size
-			if (downloadItem.url === url || downloadItem.filename.includes(filename) || downloadItem.fileSize === blob.size) {
-				console.log(`[triggerDownload] Captured chrome.downloads.onCreated event for ID: ${downloadItem.id}`);
-				resolved = true;
-				chrome.downloads.onCreated.removeListener(onCreatedListener);
-				
-				// Set up onChanged listener to revoke the blob URL when finished
-				const statusListener = (delta: chrome.downloads.DownloadDelta) => {
-					if (delta.id === downloadItem.id && delta.state) {
-						console.log(`[triggerDownload] Download ID ${downloadItem.id} state changed to: ${delta.state.current}`);
-						if (delta.state.current === 'complete' || delta.state.current === 'interrupted') {
-							console.log(`[triggerDownload] Revoking blob URL: ${url}`);
-							URL.revokeObjectURL(url);
-							chrome.downloads.onChanged.removeListener(statusListener);
-						}
-					}
-				};
-				chrome.downloads.onChanged.addListener(statusListener);
-				
-				resolve(downloadItem.id);
-			}
-		};
+		console.log(`[triggerDownload] Clicking <a> element programmatically`);
+		a.click();
 		
-		chrome.downloads.onCreated.addListener(onCreatedListener);
-
-		try {
-			console.log(`[triggerDownload] Creating temporary <a> element to trigger download`);
-			const a = document.createElement('a');
-			a.href = url;
-			a.download = filename;
-			document.body.appendChild(a);
-			a.click();
-			document.body.removeChild(a);
-			
-			// Fallback timeout in case onCreated does not fire or match
-			setTimeout(() => {
-				if (!resolved) {
-					console.log(`[triggerDownload] Timeout reached without capturing onCreated event. Resolving with 0.`);
-					chrome.downloads.onCreated.removeListener(onCreatedListener);
-					resolve(0);
-				}
-			}, 3000);
-		} catch (err) {
-			console.error(`[triggerDownload] Native download failed:`, err);
-			chrome.downloads.onCreated.removeListener(onCreatedListener);
+		document.body.removeChild(a);
+		
+		// Postpone URL revocation to let Chrome finish reading the blob
+		setTimeout(() => {
+			console.log(`[triggerDownload] Revoking blob URL: ${url}`);
 			URL.revokeObjectURL(url);
-			reject(err);
-		}
-	});
+		}, 15000);
+		
+		return 0; // Return dummy ID; background script will fetch the actual download ID
+	} catch (err) {
+		console.error(`[triggerDownload] Native download failed:`, err);
+		URL.revokeObjectURL(url);
+		throw err;
+	}
 }
 
 async function cleanupFiles(ff: FFmpeg, files: string[]) {
