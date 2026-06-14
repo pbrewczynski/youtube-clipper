@@ -4,10 +4,64 @@ import socketserver
 import json
 import subprocess
 import os
+import sqlite3
 import tempfile
 import shutil
+import glob
 
 PORT = 5005
+FIREFOX_PROFILE_NAME = os.environ.get("FIREFOX_PROFILE", "Beyond")
+
+
+def resolve_firefox_profile_path(profile_name: str) -> str | None:
+    """Resolve a Firefox profile display name to its Profiles/… folder suffix."""
+    firefox_support = os.path.expanduser("~/Library/Application Support/Firefox")
+    profile_groups_dir = os.path.join(firefox_support, "Profile Groups")
+
+    for db_path in glob.glob(os.path.join(profile_groups_dir, "*.sqlite")):
+        try:
+            with sqlite3.connect(db_path) as conn:
+                row = conn.execute(
+                    "SELECT path FROM Profiles WHERE name = ?",
+                    (profile_name,),
+                ).fetchone()
+                if row:
+                    return row[0].removeprefix("Profiles/")
+        except sqlite3.Error:
+            continue
+
+    profiles_ini = os.path.join(firefox_support, "profiles.ini")
+    if not os.path.isfile(profiles_ini):
+        return None
+
+    current_name = None
+    current_path = None
+    with open(profiles_ini, encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if line.startswith("Name="):
+                current_name = line.removeprefix("Name=")
+            elif line.startswith("Path="):
+                current_path = line.removeprefix("Path=")
+            elif not line and current_name == profile_name and current_path:
+                return current_path.removeprefix("Profiles/")
+            elif line.startswith("[") and current_name == profile_name and current_path:
+                return current_path.removeprefix("Profiles/")
+
+    if current_name == profile_name and current_path:
+        return current_path.removeprefix("Profiles/")
+
+    return None
+
+
+def build_cookies_arg(profile_name: str) -> list[str]:
+    profile_path = resolve_firefox_profile_path(profile_name)
+    if not profile_path:
+        print(f"Warning: Firefox profile '{profile_name}' not found; continuing without cookies")
+        return []
+
+    print(f"Using Firefox cookies from profile '{profile_name}' ({profile_path})")
+    return ["--cookies-from-browser", f"firefox:{profile_path}"]
 
 class BridgeHandler(http.server.BaseHTTPRequestHandler):
     def do_OPTIONS(self):
@@ -46,6 +100,7 @@ class BridgeHandler(http.server.BaseHTTPRequestHandler):
                 output_template = os.path.join(tmpdir, "out.%(ext)s")
                 cmd = [
                     "yt-dlp",
+                    *build_cookies_arg(FIREFOX_PROFILE_NAME),
                     "--download-sections", section,
                     "--force-keyframes-at-cuts",
                     "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",

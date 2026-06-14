@@ -521,6 +521,16 @@ export class TrimmerOverlay {
 	private transcriptSegments: TranscriptSegment[] | null = null;
 	private activeTranscriptIndex = -1;
 
+	private onVideoPlay = () => {
+		this.previewing = true;
+		this.updatePlayBtn();
+	};
+
+	private onVideoPause = () => {
+		this.previewing = false;
+		this.updatePlayBtn();
+	};
+
 	private els: Record<string, HTMLElement> = {};
 
 	show() {
@@ -537,6 +547,9 @@ export class TrimmerOverlay {
 		void this.refreshStreamStatus();
 		this.initTranscriptSync();
 		void this.loadTranscript();
+
+		this.video?.addEventListener('play', this.onVideoPlay);
+		this.video?.addEventListener('pause', this.onVideoPause);
 
 		this.video?.addEventListener(
 			'loadedmetadata',
@@ -769,6 +782,8 @@ export class TrimmerOverlay {
 		this.stopPreview();
 		this.clearExportListener();
 		cancelAnimationFrame(this.rafId);
+		this.video?.removeEventListener('play', this.onVideoPlay);
+		this.video?.removeEventListener('pause', this.onVideoPause);
 	}
 
 	isVisible() {
@@ -1211,7 +1226,7 @@ export class TrimmerOverlay {
 			if (!this.visible) return;
 			if (this.video) {
 				this.currentTime = this.video.currentTime;
-				if (this.previewing && this.currentTime >= this.range.end) {
+				if (!this.exporting && this.currentTime >= this.range.end && !this.video.paused) {
 					this.video.pause();
 					this.previewing = false;
 				}
@@ -1332,6 +1347,7 @@ export class TrimmerOverlay {
 						await this.exportViaStreams(streams);
 						return;
 					} catch (error) {
+						console.error('[Trimmer] Fast export via streams failed:', error);
 						const message = error instanceof Error ? error.message : 'High-speed export failed';
 						this.setStatus(`${message} — you can try switching to Playback mode.`, 'error');
 						return;
@@ -1344,6 +1360,7 @@ export class TrimmerOverlay {
 			// Playback mode or forced fallback
 			await this.exportViaRecording();
 		} catch (error) {
+			console.error('[Trimmer] Export failed with error:', error);
 			this.setProgress(false);
 			this.setStatus(error instanceof Error ? error.message : 'Export failed', 'error');
 		} finally {
@@ -1373,8 +1390,13 @@ export class TrimmerOverlay {
 				if (message?.type === 'EXPORT_TRIM_RESULT') {
 					const result = message as ExportTrimResult;
 					this.clearExportListener();
-					if (result.success) resolve(result.downloadId);
-					else reject(new Error(result.error ?? 'Export failed'));
+					if (result.success) {
+						resolve(result.downloadId);
+					} else {
+						const err = new Error(result.error ?? 'Export failed');
+						console.error('[Trimmer] Received EXPORT_TRIM_RESULT indicating failure:', err);
+						reject(err);
+					}
 				}
 			};
 
@@ -1408,37 +1430,44 @@ export class TrimmerOverlay {
 
 	private async exportViaRecording() {
 		this.setStatus('Recording selection from player…', 'progress');
-		const blob = await recordSelection(this.range, (message) => {
-			this.setStatus(message, 'progress');
-		});
+		try {
+			const blob = await recordSelection(this.range, (message) => {
+				this.setStatus(message, 'progress');
+			});
 
-		const safeTitle = getVideoTitle().replace(/[<>:"/\\|?*]/g, '').trim().slice(0, 60) || 'youtube-clip';
-		const filename = `${safeTitle}-trim.mp4`;
+			const safeTitle = getVideoTitle().replace(/[<>:"/\\|?*]/g, '').trim().slice(0, 60) || 'youtube-clip';
+			const filename = `${safeTitle}-trim.mp4`;
 
-		if (blob.type.includes('mp4')) {
-			this.setStatus('Optimizing MP4 for web & Apple…', 'progress');
-		} else {
-			this.setStatus('Encoding H.264 + AAC MP4…', 'progress');
+			if (blob.type.includes('mp4')) {
+				this.setStatus('Optimizing MP4 for web & Apple…', 'progress');
+			} else {
+				this.setStatus('Encoding H.264 + AAC MP4…', 'progress');
+			}
+
+			const startPromise = this.waitForExportResult();
+			const buffer = await blob.arrayBuffer();
+			const result = (await chrome.runtime.sendMessage({
+				type: 'EXPORT_TRANSCODE',
+				filename,
+				mimeType: blob.type || 'video/webm',
+				buffer,
+			})) as ExportTrimResult | undefined;
+
+			if (!result?.success) {
+				this.clearExportListener();
+				const err = new Error(result?.error ?? 'Could not encode MP4');
+				console.error('[Trimmer] EXPORT_TRANSCODE call returned failure status:', err);
+				throw err;
+			}
+
+			const downloadId = await startPromise;
+
+			this.setProgress(false);
+			this.showSuccess(downloadId);
+		} catch (error) {
+			console.error('[Trimmer] exportViaRecording execution failed:', error);
+			throw error;
 		}
-
-		const startPromise = this.waitForExportResult();
-		const buffer = await blob.arrayBuffer();
-		const result = (await chrome.runtime.sendMessage({
-			type: 'EXPORT_TRANSCODE',
-			filename,
-			mimeType: blob.type || 'video/webm',
-			buffer,
-		})) as ExportTrimResult | undefined;
-
-		if (!result?.success) {
-			this.clearExportListener();
-			throw new Error(result?.error ?? 'Could not encode MP4');
-		}
-
-		const downloadId = await startPromise;
-
-		this.setProgress(false);
-		this.showSuccess(downloadId);
 	}
 
 	private showSuccess(downloadId?: number) {
