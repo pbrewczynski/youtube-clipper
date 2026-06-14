@@ -55,3 +55,12 @@ export async function resolveStreamUrls(): Promise<StreamUrls> {
 
 	return streams;
 }
+
+export async function checkBridgeHealth(): Promise<boolean> {
+	try {
+		const res = await fetch('http://localhost:5005/trim', { method: 'OPTIONS' });
+		return res.ok;
+	} catch {
+		return false;
+	}
+}

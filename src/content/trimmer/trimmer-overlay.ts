@@ -7,6 +7,7 @@ import {
 	resolveStreamUrls,
 	parseStoryboard,
 	getStoryboardTileUrl,
+	checkBridgeHealth,
 } from './trimmer-utils';
 import type { StoryboardInfo } from '../../utils/youtube-player';
 import { recordSelection } from './record-fallback';
@@ -938,12 +939,15 @@ export class TrimmerOverlay {
 	}
 
 	private async refreshStreamStatus() {
-		const streams = await resolveStreamUrls();
+		const [streams, bridgeOk] = await Promise.all([resolveStreamUrls(), checkBridgeHealth()]);
 		this.streamsReady = hasUsableStreams(streams);
-		if (this.streamsReady) {
+
+		if (bridgeOk) {
+			this.setStatus('Bridge Ready — Instant high-quality export.', 'success');
+		} else if (this.streamsReady) {
 			this.setStatus('Ready — exports H.264 MP4 for web, iPhone, and Mac.');
 		} else {
-			this.setStatus('Play the video ~10s to capture the stream, then Trim & Download.');
+			this.setStatus('Play the video ~10s to capture the stream, OR start the yt-dlp bridge for instant export.');
 		}
 	}
 
@@ -967,15 +971,16 @@ export class TrimmerOverlay {
 		this.stopPreview();
 
 		try {
-			const streams = await resolveStreamUrls();
+			const [streams, bridgeOk] = await Promise.all([resolveStreamUrls(), checkBridgeHealth()]);
 			this.streamsReady = hasUsableStreams(streams);
 
-			if (this.streamsReady) {
+			// Always try the bridge/stream path first if bridge is up OR we have streams
+			if (bridgeOk || this.streamsReady) {
 				try {
 					await this.exportViaStreams(streams);
 					return;
 				} catch (error) {
-					const message = error instanceof Error ? error.message : 'Stream export failed';
+					const message = error instanceof Error ? error.message : 'High-speed export failed';
 					this.setStatus(`${message} — falling back to recording…`, 'progress');
 				}
 			}
