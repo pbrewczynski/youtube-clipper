@@ -305,38 +305,65 @@ const STYLES = `
 .controls {
 	display: flex;
 	align-items: center;
-	gap: 10px;
+	gap: 16px;
 	padding: 12px 18px 16px;
 }
 
 .play-btn {
-	width: 36px;
-	height: 36px;
+	width: 40px;
+	height: 40px;
 	border-radius: 50%;
 	border: none;
-	background: rgba(255, 255, 255, 0.12);
-	color: #fff;
+	background: #ffd60a;
+	color: #1c1c1e;
 	cursor: pointer;
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	font-size: 14px;
+	transition: background 0.15s, transform 0.1s;
+	flex-shrink: 0;
 }
 
-.play-btn:hover { background: rgba(255, 255, 255, 0.2); }
+.play-btn:hover { background: #ffe566; transform: scale(1.05); }
+.play-btn:active { transform: scale(0.95); }
+
+.play-btn.playing svg {
+	color: #1c1c1e;
+}
 
 .range-labels {
 	display: flex;
-	gap: 16px;
-	font-size: 11px;
-	opacity: 0.75;
+	gap: 24px;
+	font-size: 13px;
 	font-variant-numeric: tabular-nums;
 	flex: 1;
 }
 
-.shortcuts {
+.label-group {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.label-hint {
 	font-size: 10px;
-	opacity: 0.45;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	opacity: 0.5;
+	font-weight: 700;
+}
+
+.label-group strong {
+	font-weight: 600;
+	color: #fff;
+}
+
+.shortcuts {
+	font-size: 11px;
+	opacity: 0.4;
+	text-align: right;
+	max-width: 200px;
+	line-height: 1.4;
 }
 
 .status {
@@ -554,10 +581,20 @@ export class TrimmerOverlay {
 					</div>
 				</div>
 				<div class="controls">
-					<button class="play-btn" data-action="play-selection" title="Play selection">▶</button>
+					<button class="play-btn" data-action="play-selection" title="Play selection">
+						<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+							<path d="M8 5v14l11-7z"/>
+						</svg>
+					</button>
 					<div class="range-labels">
-						<span>In <strong data-el="in-label">0:00</strong></span>
-						<span>Out <strong data-el="out-label">0:00</strong></span>
+						<div class="label-group">
+							<span class="label-hint">In</span>
+							<strong data-el="in-label">0:00</strong>
+						</div>
+						<div class="label-group">
+							<span class="label-hint">Out</span>
+							<strong data-el="out-label">0:00</strong>
+						</div>
 					</div>
 					<div class="shortcuts">Click to scrub · Shift+drag to move selection · I / O · Space</div>
 				</div>
@@ -877,16 +914,27 @@ export class TrimmerOverlay {
 		if (this.previewing) {
 			this.video.pause();
 			this.previewing = false;
-			return;
+		} else {
+			this.video.currentTime = this.range.start;
+			this.video.play();
+			this.previewing = true;
 		}
-		this.video.currentTime = this.range.start;
-		this.video.play();
-		this.previewing = true;
+		this.updatePlayBtn();
 	}
 
 	private stopPreview() {
 		this.previewing = false;
 		this.video?.pause();
+		this.updatePlayBtn();
+	}
+
+	private updatePlayBtn() {
+		const btn = this.shadow?.querySelector('.play-btn') as HTMLElement;
+		if (!btn) return;
+		btn.classList.toggle('playing', this.previewing);
+		btn.innerHTML = this.previewing
+			? `<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`
+			: `<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`;
 	}
 
 	private async refreshStreamStatus() {

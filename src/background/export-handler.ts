@@ -136,11 +136,27 @@ export function initExportListener() {
 	});
 }
 
+async function tryYtDlpBridge(videoId: string, start: number, end: number, filename: string): Promise<boolean> {
+	try {
+		const response = await fetch('http://localhost:5005/trim', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ videoId, start, end, filename }),
+		});
+		if (!response.ok) return false;
+		const result = await response.json();
+		return !!result.success;
+	} catch {
+		return false;
+	}
+}
+
 export async function handleExportTrim(request: ExportTrimRequest): Promise<ExportTrimResult> {
-	const { title, range, streams } = request;
+	const { title, range, streams, videoId } = request;
 	const tabId = request.tabId;
 	const start = Math.max(0, range.start);
 	const end = Math.max(start + 0.1, range.end);
+	const filename = buildTrimFilename(title, start, end);
 
 	if (!tabId) {
 		return {
@@ -148,6 +164,19 @@ export async function handleExportTrim(request: ExportTrimRequest): Promise<Expo
 			success: false,
 			error: 'Could not determine the active YouTube tab.',
 		};
+	}
+
+	// Try local yt-dlp bridge first
+	sendProgress(tabId, {
+		type: 'EXPORT_TRIM_PROGRESS',
+		phase: 'downloading',
+		percent: 0,
+		message: 'Checking for local yt-dlp bridge…',
+	});
+
+	if (await tryYtDlpBridge(videoId, start, end, filename)) {
+		sendResult(tabId, { type: 'EXPORT_TRIM_RESULT', success: true });
+		return { type: 'EXPORT_TRIM_RESULT', success: true };
 	}
 
 	const streamUrl = streams.progressiveUrl ?? streams.videoUrl;
