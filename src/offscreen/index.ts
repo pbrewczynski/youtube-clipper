@@ -35,6 +35,7 @@ type TrimComplete = {
 	type: 'TRIM_COMPLETE';
 	jobId: string;
 	data: Uint8Array;
+	downloadId?: number;
 };
 
 type TrimError = {
@@ -75,20 +76,20 @@ async function runFfmpeg(ff: FFmpeg, args: string[]) {
 	return new Blob([output], { type: 'video/mp4' });
 }
 
-async function triggerDownload(blob: Blob, filename: string) {
+async function triggerDownload(blob: Blob, filename: string): Promise<number> {
 	const url = URL.createObjectURL(blob);
-	return new Promise<void>((resolve, reject) => {
+	return new Promise<number>((resolve, reject) => {
 		chrome.downloads.download(
 			{
 				url,
 				filename,
 				saveAs: true,
 			},
-			() => {
+			(downloadId) => {
 				const err = chrome.runtime.lastError;
 				URL.revokeObjectURL(url);
-				if (err) reject(new Error(err.message));
-				else resolve();
+				if (err || downloadId === undefined) reject(new Error(err?.message ?? 'Download failed'));
+				else resolve(downloadId);
 			}
 		);
 	});
@@ -125,11 +126,11 @@ async function processTrimJob(job: TrimJob & { filename: string }) {
 		tempFiles.push(...inputFiles);
 
 		const blob = await runFfmpeg(ff, args);
-		await triggerDownload(blob, filename);
+		const downloadId = await triggerDownload(blob, filename);
 
 		await cleanupFiles(ff, tempFiles);
 
-		post({ type: 'TRIM_COMPLETE', jobId, data: new Uint8Array() }); // Send empty data since we downloaded it
+		post({ type: 'TRIM_COMPLETE', jobId, data: new Uint8Array(), downloadId }); // Send empty data since we downloaded it
 	} catch (error) {
 		const message = error instanceof Error ? error.message : 'Trim failed';
 		post({ type: 'TRIM_ERROR', jobId, error: message });
@@ -155,11 +156,11 @@ async function processTranscodeBlobJob(job: TranscodeBlobJob & { filename: strin
 		tempFiles.push(inputFile);
 
 		const blob = await runFfmpeg(ff, args);
-		await triggerDownload(blob, filename);
+		const downloadId = await triggerDownload(blob, filename);
 
 		await cleanupFiles(ff, tempFiles);
 
-		post({ type: 'TRIM_COMPLETE', jobId, data: new Uint8Array() });
+		post({ type: 'TRIM_COMPLETE', jobId, data: new Uint8Array(), downloadId });
 	} catch (error) {
 		const message = error instanceof Error ? error.message : 'Transcode failed';
 		post({ type: 'TRIM_ERROR', jobId, error: message });
@@ -181,7 +182,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 		const bytes = message.buffer instanceof Uint8Array ? message.buffer : new Uint8Array(message.buffer);
 		const blob = new Blob([bytes], { type: message.mimeType ?? 'video/mp4' });
 		triggerDownload(blob, message.filename)
-			.then(() => sendResponse({ success: true }))
+			.then((downloadId) => sendResponse({ success: true, downloadId }))
 			.catch((err) => sendResponse({ success: false, error: err.message }));
 		return true;
 	}

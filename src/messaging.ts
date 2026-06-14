@@ -30,6 +30,7 @@ export type ExportTrimResult = {
 	type: 'EXPORT_TRIM_RESULT';
 	success: boolean;
 	error?: string;
+	downloadId?: number;
 };
 
 export type ExportTranscodeRequest = {

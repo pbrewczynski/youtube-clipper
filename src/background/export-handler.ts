@@ -83,7 +83,7 @@ export function initExportListener() {
 			const job = pendingJobs.get(message.jobId);
 			if (!job) return;
 
-			sendResult(job.tabId, { type: 'EXPORT_TRIM_RESULT', success: true });
+			sendResult(job.tabId, { type: 'EXPORT_TRIM_RESULT', success: true, downloadId: message.downloadId });
 			pendingJobs.delete(message.jobId);
 			return;
 		}

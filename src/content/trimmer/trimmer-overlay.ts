@@ -402,7 +402,12 @@ const STYLES = `
 
 .status.error { color: #ff6b6b; }
 .status.progress { color: #ffd60a; }
-.status.success { color: #4cd964; }
+.status.success {
+	color: #4cd964;
+	display: flex;
+	align-items: center;
+	font-weight: 500;
+}
 
 .progress-bar {
 	height: 3px;
@@ -1114,7 +1119,7 @@ export class TrimmerOverlay {
 		}
 	}
 
-	private waitForExportResult(): Promise<void> {
+	private waitForExportResult(): Promise<number | undefined> {
 		this.clearExportListener();
 
 		return new Promise((resolve, reject) => {
@@ -1128,7 +1133,7 @@ export class TrimmerOverlay {
 				if (message?.type === 'EXPORT_TRIM_RESULT') {
 					const result = message as ExportTrimResult;
 					this.clearExportListener();
-					if (result.success) resolve();
+					if (result.success) resolve(result.downloadId);
 					else reject(new Error(result.error ?? 'Export failed'));
 				}
 			};
@@ -1155,10 +1160,10 @@ export class TrimmerOverlay {
 			throw new Error(result?.error ?? 'Could not start export');
 		}
 
-		await startPromise;
+		const downloadId = await startPromise;
 
 		this.setProgress(false);
-		this.setStatus('Clip saved to your downloads!', 'success');
+		this.showSuccess(downloadId);
 	}
 
 	private async exportViaRecording() {
@@ -1190,10 +1195,31 @@ export class TrimmerOverlay {
 			throw new Error(result?.error ?? 'Could not encode MP4');
 		}
 
-		await startPromise;
+		const downloadId = await startPromise;
 
 		this.setProgress(false);
-		this.setStatus('Clip saved to your downloads!', 'success');
+		this.showSuccess(downloadId);
+	}
+
+	private showSuccess(downloadId?: number) {
+		const el = this.els.status;
+		el.innerHTML = 'Clip saved to your downloads! ';
+		el.className = 'status success';
+
+		if (downloadId !== undefined) {
+			const link = document.createElement('a');
+			link.href = '#';
+			link.textContent = 'Show in Finder';
+			link.style.color = '#ffd60a';
+			link.style.textDecoration = 'underline';
+			link.style.marginLeft = '8px';
+			link.style.cursor = 'pointer';
+			link.onclick = (e) => {
+				e.preventDefault();
+				chrome.runtime.sendMessage({ type: 'SHOW_DOWNLOAD', downloadId });
+			};
+			el.appendChild(link);
+		}
 	}
 
 }

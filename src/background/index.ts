@@ -57,6 +57,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 		);
 		return true;
 	}
+
+	if (message?.type === 'SHOW_DOWNLOAD') {
+		chrome.downloads.show(message.downloadId);
+		sendResponse({ ok: true });
+		return;
+	}
 });
 
 async function playToggle() {
