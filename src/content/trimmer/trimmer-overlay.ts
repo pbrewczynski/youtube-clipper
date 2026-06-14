@@ -142,14 +142,17 @@ const STYLES = `
 	inset: 0;
 	border-radius: inherit;
 	overflow: hidden;
-	background: repeating-linear-gradient(
-		90deg,
-		rgba(255, 255, 255, 0.04) 0,
-		rgba(255, 255, 255, 0.04) 1px,
-		transparent 1px,
-		transparent 48px
-	);
+	display: flex;
 	pointer-events: none;
+}
+
+.timeline-thumb {
+	flex: 1 0 auto;
+	height: 100%;
+	background-size: cover;
+	background-position: center;
+	background-repeat: no-repeat;
+	border-right: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .dim-left, .dim-right {
@@ -401,6 +404,7 @@ export class TrimmerOverlay {
 		this.visible = true;
 		this.host!.style.display = 'flex';
 		this.syncFromVideo();
+		this.populateTimeline();
 		this.seekTo(this.range.start);
 		this.updateUI();
 		this.startPlayheadLoop();
@@ -410,10 +414,53 @@ export class TrimmerOverlay {
 			'loadedmetadata',
 			() => {
 				this.syncFromVideo();
+				this.populateTimeline();
 				this.updateUI();
 			},
 			{ once: true }
 		);
+	}
+
+	private populateTimeline() {
+		const track = this.els.timeline.querySelector('.timeline-track') as HTMLElement;
+		if (!track) return;
+		track.innerHTML = '';
+
+		if (!this.storyboardInfo || this.duration <= 0) {
+			track.style.background = 'repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.04) 0, rgba(255, 255, 255, 0.04) 1px, transparent 1px, transparent 48px)';
+			return;
+		}
+
+		track.style.background = 'none';
+		const info = this.storyboardInfo;
+		const trackRect = this.els.timeline.getBoundingClientRect();
+		const trackWidth = trackRect.width || 900;
+		const thumbHeight = 56;
+		const thumbWidth = thumbHeight * (info.width / info.height);
+		const count = Math.ceil(trackWidth / thumbWidth);
+
+		for (let i = 0; i < count; i++) {
+			const time = (i / count) * this.duration;
+			const url = getStoryboardTileUrl(info, time, this.duration);
+			const thumb = document.createElement('div');
+			thumb.className = 'timeline-thumb';
+			thumb.style.width = `${thumbWidth}px`;
+			
+			const totalIntervals = info.count;
+			const intervalDuration = Math.max(info.interval, this.duration / totalIntervals);
+			const currentInterval = Math.max(0, Math.floor(time / intervalDuration));
+			const cols = 5;
+			const rows = 5;
+			const indexInTile = currentInterval % (cols * rows);
+			const col = indexInTile % cols;
+			const row = Math.floor(indexInTile / cols);
+
+			thumb.style.backgroundImage = `url("${url}")`;
+			thumb.style.backgroundSize = `${cols * 100}% ${rows * 100}%`;
+			thumb.style.backgroundPosition = `${(col / (cols - 1)) * 100}% ${(row / (rows - 1)) * 100}%`;
+			
+			track.appendChild(thumb);
+		}
 	}
 
 	hide() {
@@ -738,7 +785,8 @@ export class TrimmerOverlay {
 			image.style.width = `${info.width}px`;
 			image.style.height = `${info.height}px`;
 			image.style.backgroundImage = `url("${url}")`;
-			image.style.backgroundPosition = `-${col * info.width}px -${row * info.height}px`;
+			image.style.backgroundSize = `${cols * 100}% ${rows * 100}%`;
+			image.style.backgroundPosition = `${(col / (cols - 1)) * 100}% ${(row / (rows - 1)) * 100}%`;
 			
 			// Adjust dimensions if it's the last thumbnail which might not be full width
 			preview.style.width = `${info.width}px`;

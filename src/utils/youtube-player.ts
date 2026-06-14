@@ -33,6 +33,40 @@ export function getPlayerResponse(): Record<string, unknown> | null {
 		return win.ytInitialPlayerResponse as Record<string, unknown>;
 	}
 
+	// In content scripts, we often can't access window.ytInitialPlayerResponse directly.
+	// We look for the script tag that defines it.
+	const scripts = document.querySelectorAll('script');
+	for (const script of scripts) {
+		const text = script.textContent || '';
+		if (text.includes('ytInitialPlayerResponse = ')) {
+			try {
+				const match = text.match(/ytInitialPlayerResponse\s*=\s*({.+?});/);
+				if (match) {
+					return JSON.parse(match[1]) as Record<string, unknown>;
+				}
+				// Fallback for cases where it might not end with a semicolon or is assigned differently
+				const startIdx = text.indexOf('ytInitialPlayerResponse = ') + 'ytInitialPlayerResponse = '.length;
+				let bracketCount = 0;
+				let endIdx = -1;
+				for (let i = startIdx; i < text.length; i++) {
+					if (text[i] === '{') bracketCount++;
+					else if (text[i] === '}') {
+						bracketCount--;
+						if (bracketCount === 0) {
+							endIdx = i + 1;
+							break;
+						}
+					}
+				}
+				if (endIdx !== -1) {
+					return JSON.parse(text.slice(startIdx, endIdx)) as Record<string, unknown>;
+				}
+			} catch {
+				// ignore parse errors
+			}
+		}
+	}
+
 	const configEl = document.querySelector('script.yt-player-config');
 	if (configEl?.textContent) {
 		try {
