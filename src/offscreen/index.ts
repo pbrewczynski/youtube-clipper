@@ -77,8 +77,12 @@ async function runFfmpeg(ff: FFmpeg, args: string[]) {
 }
 
 async function triggerDownload(blob: Blob, filename: string): Promise<number> {
+	console.log(`[triggerDownload] Creating blob URL for ${filename}, size: ${blob.size} bytes`);
 	const url = URL.createObjectURL(blob);
+	console.log(`[triggerDownload] Blob URL created: ${url}`);
+	
 	return new Promise<number>((resolve, reject) => {
+		console.log(`[triggerDownload] Initiating chrome.downloads.download for ${filename}`);
 		chrome.downloads.download(
 			{
 				url,
@@ -87,9 +91,29 @@ async function triggerDownload(blob: Blob, filename: string): Promise<number> {
 			},
 			(downloadId) => {
 				const err = chrome.runtime.lastError;
-				URL.revokeObjectURL(url);
-				if (err || downloadId === undefined) reject(new Error(err?.message ?? 'Download failed'));
-				else resolve(downloadId);
+				if (err || downloadId === undefined) {
+					console.error(`[triggerDownload] Download failed to initiate:`, err);
+					URL.revokeObjectURL(url);
+					reject(new Error(err?.message ?? 'Download failed'));
+					return;
+				}
+
+				console.log(`[triggerDownload] Download initiated successfully with ID: ${downloadId}`);
+
+				// Safely revoke the URL once the download is finished or interrupted
+				const listener = (delta: chrome.downloads.DownloadDelta) => {
+					if (delta.id === downloadId && delta.state) {
+						console.log(`[triggerDownload] Download ID ${downloadId} state changed to: ${delta.state.current}`);
+						if (delta.state.current === 'complete' || delta.state.current === 'interrupted') {
+							console.log(`[triggerDownload] Revoking blob URL: ${url}`);
+							URL.revokeObjectURL(url);
+							chrome.downloads.onChanged.removeListener(listener);
+						}
+					}
+				};
+				chrome.downloads.onChanged.addListener(listener);
+				
+				resolve(downloadId);
 			}
 		);
 	});
