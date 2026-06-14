@@ -1446,7 +1446,7 @@ export class TrimmerOverlay {
 		el.innerHTML = 'Clip saved to your downloads! ';
 		el.className = 'status success';
 
-		if (downloadId !== undefined) {
+		if (downloadId !== undefined && downloadId !== 0) {
 			const link = document.createElement('a');
 			link.href = '#';
 			link.textContent = 'Show in Finder';

@@ -82,40 +82,57 @@ async function triggerDownload(blob: Blob, filename: string): Promise<number> {
 	console.log(`[triggerDownload] Blob URL created: ${url}`);
 	
 	return new Promise<number>((resolve, reject) => {
-		console.log(`[triggerDownload] Initiating chrome.downloads.download for ${filename}`);
-		chrome.downloads.download(
-			{
-				url,
-				filename,
-				saveAs: true,
-			},
-			(downloadId) => {
-				const err = chrome.runtime.lastError;
-				if (err || downloadId === undefined) {
-					console.error(`[triggerDownload] Download failed to initiate:`, err);
-					URL.revokeObjectURL(url);
-					reject(new Error(err?.message ?? 'Download failed'));
-					return;
-				}
-
-				console.log(`[triggerDownload] Download initiated successfully with ID: ${downloadId}`);
-
-				// Safely revoke the URL once the download is finished or interrupted
-				const listener = (delta: chrome.downloads.DownloadDelta) => {
-					if (delta.id === downloadId && delta.state) {
-						console.log(`[triggerDownload] Download ID ${downloadId} state changed to: ${delta.state.current}`);
+		let resolved = false;
+		
+		const onCreatedListener = (downloadItem: chrome.downloads.DownloadItem) => {
+			// Check if the download URL matches or has the same size
+			if (downloadItem.url === url || downloadItem.filename.includes(filename) || downloadItem.fileSize === blob.size) {
+				console.log(`[triggerDownload] Captured chrome.downloads.onCreated event for ID: ${downloadItem.id}`);
+				resolved = true;
+				chrome.downloads.onCreated.removeListener(onCreatedListener);
+				
+				// Set up onChanged listener to revoke the blob URL when finished
+				const statusListener = (delta: chrome.downloads.DownloadDelta) => {
+					if (delta.id === downloadItem.id && delta.state) {
+						console.log(`[triggerDownload] Download ID ${downloadItem.id} state changed to: ${delta.state.current}`);
 						if (delta.state.current === 'complete' || delta.state.current === 'interrupted') {
 							console.log(`[triggerDownload] Revoking blob URL: ${url}`);
 							URL.revokeObjectURL(url);
-							chrome.downloads.onChanged.removeListener(listener);
+							chrome.downloads.onChanged.removeListener(statusListener);
 						}
 					}
 				};
-				chrome.downloads.onChanged.addListener(listener);
+				chrome.downloads.onChanged.addListener(statusListener);
 				
-				resolve(downloadId);
+				resolve(downloadItem.id);
 			}
-		);
+		};
+		
+		chrome.downloads.onCreated.addListener(onCreatedListener);
+
+		try {
+			console.log(`[triggerDownload] Creating temporary <a> element to trigger download`);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = filename;
+			document.body.appendChild(a);
+			a.click();
+			document.body.removeChild(a);
+			
+			// Fallback timeout in case onCreated does not fire or match
+			setTimeout(() => {
+				if (!resolved) {
+					console.log(`[triggerDownload] Timeout reached without capturing onCreated event. Resolving with 0.`);
+					chrome.downloads.onCreated.removeListener(onCreatedListener);
+					resolve(0);
+				}
+			}, 3000);
+		} catch (err) {
+			console.error(`[triggerDownload] Native download failed:`, err);
+			chrome.downloads.onCreated.removeListener(onCreatedListener);
+			URL.revokeObjectURL(url);
+			reject(err);
+		}
 	});
 }
 
