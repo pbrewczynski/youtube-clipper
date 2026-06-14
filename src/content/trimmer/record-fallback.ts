@@ -15,7 +15,7 @@ export async function recordSelection(range: TrimRange, onProgress: (message: st
 	];
 	const mimeType = candidates.find((type) => MediaRecorder.isTypeSupported(type)) ?? 'video/webm';
 
-	const stream = video.captureStream();
+	const stream = (video as any).captureStream();
 	const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8_000_000 });
 	const chunks: Blob[] = [];
 

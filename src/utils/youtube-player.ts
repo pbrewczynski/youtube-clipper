@@ -5,6 +5,8 @@ export type StoryboardInfo = {
 	height: number;
 	count: number;
 	interval: number;
+	cols: number;
+	rows: number;
 };
 
 export type PlayerFormat = {
@@ -152,6 +154,20 @@ export function getAdaptiveStreamUrls(playerResponse?: Record<string, unknown> |
 	};
 }
 
+function replaceQueryParam(url: string, param: string, newValue: string): string {
+	try {
+		const u = new URL(url);
+		u.searchParams.set(param, newValue);
+		return u.toString();
+	} catch {
+		const regex = new RegExp(`([?&])${param}=[^&]*`);
+		if (url.match(regex)) {
+			return url.replace(regex, `$1${param}=${newValue}`);
+		}
+		return url + (url.includes('?') ? '&' : '?') + `${param}=${newValue}`;
+	}
+}
+
 export function parseStoryboard(playerResponse?: Record<string, unknown> | null): StoryboardInfo | null {
 	const response = playerResponse ?? getPlayerResponse();
 	const spec =
@@ -172,27 +188,55 @@ export function parseStoryboard(playerResponse?: Record<string, unknown> | null)
 
 	if (!spec) return null;
 
-	const [urlPart, sizePart] = spec.split('|');
-	if (!urlPart || !sizePart) return null;
+	const parts = spec.split('|');
+	if (parts.length < 2) return null;
 
-	const [width, height, count] = sizePart.split('#').map((v) => parseInt(v, 10));
-	const levelMatch = urlPart.match(/\/storyboard(\d+)_L/);
-	const intervalMatch = spec.match(/#(\d+)#/g);
+	const urlPart = parts[0];
+
+	// Choose the highest quality level (the last configuration part)
+	const levelIndex = parts.length - 1;
+	const level = levelIndex - 1;
+	const sizePart = parts[levelIndex];
+	if (!sizePart) return null;
+
+	const sizeParams = sizePart.split('#');
+	const width = parseInt(sizeParams[0], 10) || 160;
+	const height = parseInt(sizeParams[1], 10) || 90;
+	const count = parseInt(sizeParams[2], 10) || 100;
+	const cols = parseInt(sizeParams[3], 10) || 5;
+	const rows = parseInt(sizeParams[4], 10) || 5;
+	
+	let interval = parseInt(sizeParams[5], 10) || 10000;
+	if (interval > 100) {
+		interval = interval / 1000;
+	}
+
+	let baseUrl = urlPart.replace('$L', String(level));
+	
+	const sigh = sizeParams[7];
+	if (sigh) {
+		baseUrl = replaceQueryParam(baseUrl, 'sigh', sigh);
+	}
 
 	return {
-		baseUrl: urlPart.replace('$L', '3').replace('$N', '0'),
-		level: levelMatch ? parseInt(levelMatch[1], 10) : 3,
-		width: width || 160,
-		height: height || 90,
-		count: count || 100,
-		interval: intervalMatch ? parseInt(intervalMatch[intervalMatch.length - 1].replace(/#/g, ''), 10) : 10,
+		baseUrl,
+		level,
+		width,
+		height,
+		count,
+		interval,
+		cols,
+		rows,
 	};
 }
 
 export function getStoryboardTileUrl(info: StoryboardInfo, time: number, duration: number): string {
-	const index = Math.min(
-		info.count - 1,
-		Math.max(0, Math.floor(time / Math.max(info.interval, duration / info.count)))
-	);
-	return info.baseUrl.replace('$N', String(index));
+	const framesPerTile = info.cols * info.rows;
+	const frameIndex = Math.max(0, Math.floor(time / info.interval));
+	const tileIndex = Math.floor(frameIndex / framesPerTile);
+	
+	const totalTiles = Math.ceil(info.count / framesPerTile);
+	const clampedTileIndex = Math.min(totalTiles - 1, Math.max(0, tileIndex));
+
+	return info.baseUrl.replace('$N', String(clampedTileIndex));
 }

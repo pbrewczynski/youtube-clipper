@@ -8,10 +8,17 @@ import {
 	parseStoryboard,
 	getStoryboardTileUrl,
 	checkBridgeHealth,
+	getPlayerResponse,
 } from './trimmer-utils';
 import type { StoryboardInfo } from '../../utils/youtube-player';
 import { recordSelection } from './record-fallback';
 import { stopClipPlayback } from '../clip-playback';
+
+type TranscriptSegment = {
+	start: number;
+	duration: number;
+	text: string;
+};
 
 const STYLES = `
 :host { all: initial; }
@@ -425,6 +432,61 @@ const STYLES = `
 	width: 0%;
 	transition: width 0.2s;
 }
+
+.transcript-box {
+	display: flex;
+	flex-direction: column;
+	max-height: 90px;
+	margin-bottom: 12px;
+	background: rgba(0, 0, 0, 0.45);
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: 8px;
+	overflow-y: auto;
+	padding: 6px 10px;
+	gap: 6px;
+	scrollbar-width: thin;
+	scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+.transcript-box::-webkit-scrollbar {
+	width: 4px;
+}
+.transcript-box::-webkit-scrollbar-thumb {
+	background: rgba(255, 255, 255, 0.15);
+	border-radius: 2px;
+}
+
+.transcript-line {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	font-size: 11px;
+	color: rgba(255, 255, 255, 0.6);
+	cursor: pointer;
+	line-height: 1.4;
+	transition: color 0.15s ease;
+	user-select: none;
+	text-align: left;
+}
+
+.transcript-line:hover {
+	color: #fff;
+}
+
+.transcript-line.active {
+	color: #ffd60a;
+	font-weight: 500;
+}
+
+.transcript-line-time {
+	font-family: ui-monospace, monospace;
+	opacity: 0.5;
+	flex-shrink: 0;
+}
+
+.transcript-line-text {
+	word-break: break-word;
+}
 `;
 
 function formatTime(seconds: number): string {
@@ -456,6 +518,8 @@ export class TrimmerOverlay {
 	private storyboardInfo: StoryboardInfo | null = null;
 	private exportMode: 'bridge' | 'playback' = 'bridge';
 	private transcriptObserver: MutationObserver | null = null;
+	private transcriptSegments: TranscriptSegment[] | null = null;
+	private activeTranscriptIndex = -1;
 
 	private els: Record<string, HTMLElement> = {};
 
@@ -472,6 +536,7 @@ export class TrimmerOverlay {
 		this.startPlayheadLoop();
 		void this.refreshStreamStatus();
 		this.initTranscriptSync();
+		void this.loadTranscript();
 
 		this.video?.addEventListener(
 			'loadedmetadata',
@@ -534,6 +599,113 @@ export class TrimmerOverlay {
 		}
 	}
 
+	private async fetchTranscript(playerResponse: any): Promise<TranscriptSegment[] | null> {
+		try {
+			const captionTracks = playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+			if (!captionTracks || captionTracks.length === 0) return null;
+
+			const track = captionTracks.find((t: any) => t.languageCode === 'en' && !t.kind) ||
+			              captionTracks.find((t: any) => t.languageCode === 'en') ||
+			              captionTracks[0];
+
+			if (!track?.baseUrl) return null;
+
+			const url = track.baseUrl + '&fmt=json3';
+			const res = await fetch(url);
+			if (!res.ok) return null;
+
+			const data = await res.json();
+			if (!data?.events) return null;
+
+			const segments: TranscriptSegment[] = [];
+			for (const event of data.events) {
+				if (!event.segs || event.segs.length === 0) continue;
+				
+				const text = event.segs
+					.map((s: any) => s.utf8)
+					.join('')
+					.replace(/\n/g, ' ')
+					.trim();
+
+				if (!text) continue;
+
+				const start = (event.tStartMs || 0) / 1000;
+				const duration = (event.dDurationMs || 0) / 1000;
+				
+				segments.push({ start, duration, text });
+			}
+
+			return segments;
+		} catch (err) {
+			console.warn('Failed to fetch transcript:', err);
+			return null;
+		}
+	}
+
+	private scrapeTranscriptFromDOM(): TranscriptSegment[] | null {
+		const segments: TranscriptSegment[] = [];
+		const segElements = document.querySelectorAll('ytd-transcript-segment-renderer, .transcript-segment');
+		if (segElements.length === 0) return null;
+
+		const findTime = (el: HTMLElement): number | null => {
+			const timeStr = el.querySelector('.segment-timestamp, #timestamp')?.textContent?.trim();
+			if (!timeStr) return null;
+			const parts = timeStr.split(':').map(Number);
+			if (parts.length === 2) return parts[0] * 60 + parts[1];
+			if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+			return null;
+		};
+
+		segElements.forEach((el) => {
+			const start = findTime(el as HTMLElement);
+			if (start === null) return;
+			const text = el.querySelector('.segment-text, #text')?.textContent?.trim() || '';
+			segments.push({ start, duration: 2, text });
+		});
+
+		return segments.length > 0 ? segments : null;
+	}
+
+	private async loadTranscript() {
+		this.transcriptSegments = null;
+		this.activeTranscriptIndex = -1;
+		this.els['transcript-box'].style.display = 'none';
+		this.els['transcript-box'].innerHTML = '';
+
+		const response = getPlayerResponse();
+		let segments = await this.fetchTranscript(response);
+		if (!segments) {
+			segments = this.scrapeTranscriptFromDOM();
+		}
+
+		if (segments && segments.length > 0) {
+			this.transcriptSegments = segments;
+			
+			const fragment = document.createDocumentFragment();
+			segments.forEach((seg) => {
+				const line = document.createElement('div');
+				line.className = 'transcript-line';
+				line.dataset.start = String(seg.start);
+				line.dataset.duration = String(seg.duration);
+				
+				const timeSpan = document.createElement('span');
+				timeSpan.className = 'transcript-line-time';
+				timeSpan.textContent = formatTime(seg.start);
+				
+				const textSpan = document.createElement('span');
+				textSpan.className = 'transcript-line-text';
+				textSpan.textContent = seg.text;
+				
+				line.appendChild(timeSpan);
+				line.appendChild(textSpan);
+				fragment.appendChild(line);
+			});
+
+			this.els['transcript-box'].appendChild(fragment);
+			this.els['transcript-box'].style.display = 'flex';
+		}
+	}
+
 	private populateTimeline() {
 		const track = this.els.timeline.querySelector('.timeline-track') as HTMLElement;
 		if (!track) return;
@@ -553,7 +725,7 @@ export class TrimmerOverlay {
 		const count = Math.ceil(trackWidth / thumbWidth) + 1; // Add one extra for overlap safety
 
 		for (let i = 0; i < count; i++) {
-			const time = (i / count) * this.duration;
+			const time = Math.min(this.duration, ((i * thumbWidth) / trackWidth) * this.duration);
 			const url = getStoryboardTileUrl(info, time, this.duration);
 			const thumb = document.createElement('div');
 			thumb.className = 'timeline-thumb';
@@ -562,15 +734,18 @@ export class TrimmerOverlay {
 			const totalIntervals = info.count;
 			const intervalDuration = Math.max(info.interval, this.duration / totalIntervals);
 			const currentInterval = Math.max(0, Math.floor(time / intervalDuration));
-			const cols = 5;
-			const rows = 5;
+			const cols = info.cols;
+			const rows = info.rows;
 			const indexInTile = currentInterval % (cols * rows);
 			const col = indexInTile % cols;
 			const row = Math.floor(indexInTile / cols);
 
+			const colPercent = cols > 1 ? (col / (cols - 1)) * 100 : 0;
+			const rowPercent = rows > 1 ? (row / (rows - 1)) * 100 : 0;
+
 			thumb.style.backgroundImage = `url("${url}")`;
 			thumb.style.backgroundSize = `${cols * 100}% ${rows * 100}%`;
-			thumb.style.backgroundPosition = `${(col / (cols - 1)) * 100}% ${(row / (rows - 1)) * 100}%`;
+			thumb.style.backgroundPosition = `${colPercent}% ${rowPercent}%`;
 			
 			track.appendChild(thumb);
 		}
@@ -652,6 +827,7 @@ export class TrimmerOverlay {
 						<div class="time-current">0:00</div>
 						<div class="time-meta">Duration: <span data-el="clip-duration">0:00</span></div>
 					</div>
+					<div class="transcript-box" data-el="transcript-box" style="display: none;"></div>
 					<div class="timeline-wrap" data-el="timeline">
 						<div class="timeline-track"></div>
 						<div class="selection" data-el="selection"></div>
@@ -705,6 +881,20 @@ export class TrimmerOverlay {
 		this.els.exportBtn = overlay.querySelector('[data-action="export"]') as HTMLElement;
 		this.els.timeCurrent = overlay.querySelector('.time-current') as HTMLElement;
 		this.els.timeline = this.els.timeline;
+
+		this.els['transcript-box'].addEventListener('click', (e) => {
+			const line = (e.target as HTMLElement).closest('.transcript-line') as HTMLElement;
+			if (!line) return;
+			const start = parseFloat(line.dataset.start || '0');
+			const duration = parseFloat(line.dataset.duration || '2');
+			if (e.shiftKey) {
+				this.range.end = Math.min(this.duration, Math.max(start + duration, this.range.start + 0.5));
+			} else {
+				this.range.start = Math.max(0, Math.min(start, this.range.end - 0.5));
+				this.seekTo(this.range.start);
+			}
+			this.updateUI();
+		});
 
 		overlay.addEventListener('click', (e) => {
 			const target = (e.target as HTMLElement).closest('[data-action]') as HTMLElement | null;
@@ -922,17 +1112,20 @@ export class TrimmerOverlay {
 			const currentInterval = Math.max(0, Math.floor(time / intervalDuration));
 			
 			// Number of thumbnails per tile image
-			const cols = 5; // Typically YouTube uses 5x5 grids for level 3
-			const rows = 5;
+			const cols = info.cols;
+			const rows = info.rows;
 			const indexInTile = currentInterval % (cols * rows);
 			const col = indexInTile % cols;
 			const row = Math.floor(indexInTile / cols);
+
+			const colPercent = cols > 1 ? (col / (cols - 1)) * 100 : 0;
+			const rowPercent = rows > 1 ? (row / (rows - 1)) * 100 : 0;
 
 			image.style.width = `${info.width}px`;
 			image.style.height = `${info.height}px`;
 			image.style.backgroundImage = `url("${url}")`;
 			image.style.backgroundSize = `${cols * 100}% ${rows * 100}%`;
-			image.style.backgroundPosition = `${(col / (cols - 1)) * 100}% ${(row / (rows - 1)) * 100}%`;
+			image.style.backgroundPosition = `${colPercent}% ${rowPercent}%`;
 			
 			// Adjust dimensions if it's the last thumbnail which might not be full width
 			preview.style.width = `${info.width}px`;
@@ -1011,6 +1204,41 @@ export class TrimmerOverlay {
 					this.previewing = false;
 				}
 				this.updateUI();
+
+				// Highlight and auto-scroll transcript line
+				if (this.transcriptSegments && this.transcriptSegments.length > 0 && this.els['transcript-box'].style.display !== 'none') {
+					let activeIndex = -1;
+					for (let i = 0; i < this.transcriptSegments.length; i++) {
+						const seg = this.transcriptSegments[i];
+						if (this.currentTime >= seg.start && this.currentTime < seg.start + seg.duration) {
+							activeIndex = i;
+							break;
+						}
+					}
+					if (activeIndex === -1) {
+						for (let i = this.transcriptSegments.length - 1; i >= 0; i--) {
+							if (this.currentTime >= this.transcriptSegments[i].start) {
+								activeIndex = i;
+								break;
+							}
+						}
+					}
+					if (activeIndex === -1 && this.transcriptSegments.length > 0) {
+						activeIndex = 0;
+					}
+					if (activeIndex !== -1 && activeIndex !== this.activeTranscriptIndex) {
+						const lines = this.els['transcript-box'].children;
+						if (this.activeTranscriptIndex >= 0 && this.activeTranscriptIndex < lines.length) {
+							(lines[this.activeTranscriptIndex] as HTMLElement).classList.remove('active');
+						}
+						this.activeTranscriptIndex = activeIndex;
+						if (activeIndex < lines.length) {
+							const activeEl = lines[activeIndex] as HTMLElement;
+							activeEl.classList.add('active');
+							activeEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+						}
+					}
+				}
 			}
 			this.rafId = requestAnimationFrame(tick);
 		};

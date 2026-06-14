@@ -6,3 +6,11 @@ export interface IVideo {
 	clips: IVideoClip[];
 	loop: boolean;
 }
+
+export interface IVideox {
+	id: string;
+	title: string;
+	start: number;
+	end: number;
+	loop: boolean;
+}

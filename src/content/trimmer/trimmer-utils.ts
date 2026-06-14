@@ -6,6 +6,7 @@ export {
 	getAdaptiveStreamUrls,
 	parseStoryboard,
 	getStoryboardTileUrl,
+	getPlayerResponse,
 } from '../../utils/youtube-player';
 
 import type { StreamUrls } from '../../messaging';

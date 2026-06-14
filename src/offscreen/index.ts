@@ -95,6 +95,16 @@ async function triggerDownload(blob: Blob, filename: string): Promise<number> {
 	});
 }
 
+async function cleanupFiles(ff: FFmpeg, files: string[]) {
+	for (const file of files) {
+		try {
+			await ff.deleteFile(file);
+		} catch {
+			// ignore if not found or delete fails
+		}
+	}
+}
+
 async function processTrimJob(job: TrimJob & { filename: string }) {
 	const { jobId, videoData, audioData, trimStartOffset, duration, mode, filename } = job;
 	const tempFiles = ['output.mp4'];
